@@ -17,7 +17,7 @@
 
 gnss_fix_t      g_gnss_fix;        //zero-initialised at startup 
 osMutexId_t     g_gnss_mutex;
- osSemaphoreId_t g_gnss_idle_sem;  //binary semaphore, given from UART idle ISR 
+osSemaphoreId_t g_gnss_idle_sem;  //binary semaphore, given from UART idle ISR 
 
 static gnss_driver_t s_drv;
 

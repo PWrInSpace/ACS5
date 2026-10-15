@@ -22,17 +22,11 @@
 
 typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
 
-/* ---------------------------------------------------------- UART placeholder
+/* ---------------------------------------------------------- UART
  *
- * TODO: confirm UART from schematic before first hardware bring-up.
- *
- * The handle is declared extern here so max_m10s.c can reference it without
- * knowing which UART number was chosen.
- *
- * Change GNSS_HUART_HANDLE to the actual symbol when the schematic is final:
- *   #define GNSS_HUART_HANDLE   huart3
+ * ORC Meteor board port labeled TX6/RX6 on PE8/PE7 — silicon AF is UART7.
  */
-#define GNSS_HUART_HANDLE   huart3   /* TODO: confirm UART from schematic */
+#define GNSS_HUART_HANDLE   huart7
 extern UART_HandleTypeDef GNSS_HUART_HANDLE;
 
 /* DMA RX ring size. */
