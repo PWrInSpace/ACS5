@@ -96,16 +96,9 @@ static WARN_UNUSED max_m10s_status_t send_cfg_valset(uint32_t key, const uint8_t
 
                 if (!ubx_parse_byte(&ack_parser, b))
                     continue;
-                if (ack_parser.msg_class != UBX_CLASS_ACK)
-                    continue;
-
-                uint8_t acked_class, acked_id;
-                bool    acknowledged;
-                if (!ubx_decode_ack(ack_parser.msg_id, ack_parser.payload,
-                                    ack_parser.len, &acked_class, &acked_id,
-                                    &acknowledged))
-                    continue;
-                if (acked_class != UBX_CLASS_CFG || acked_id != UBX_ID_CFG_VALSET)
+                bool acknowledged;
+                if (!ubx_is_ack_for(&ack_parser, UBX_CLASS_CFG,
+                                    UBX_ID_CFG_VALSET, &acknowledged))
                     continue;
 
                 if (!acknowledged)

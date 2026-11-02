@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "gnss/ubx_parse.h"
+
 /* ------------------------------------------------------------------ GNSS */
 
 /*
@@ -57,9 +59,9 @@ typedef struct
 
     /* -------------------------------------------- UBX-NAV-PVT: fix status */
 
-    /* 0=none 1=dead-reck 2=2D 3=3D 4=GNSS+DR 5=time-only.
+    /* Receiver fix type (UBX_FIX_NONE ... UBX_FIX_TIME_ONLY).
      * Check fix_ok alongside this; see fix_valid above. */
-    uint8_t  fix_type;
+    ubx_fix_type_t fix_type;
     bool     fix_ok;
     uint8_t  num_sv;
 

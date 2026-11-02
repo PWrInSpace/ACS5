@@ -28,7 +28,9 @@ static int32_t rd_i32(const uint8_t *p)
 
 /* ------------------------------------------------------------------ checksum */
 
-void ubx_checksum(const uint8_t *buf, uint16_t len, uint8_t *ck_a, uint8_t *ck_b)
+/* Fletcher-8 over buf[0..len). Only used to build outgoing frames; the parser
+ * accumulates the same sum incrementally as bytes arrive. */
+static void ubx_checksum(const uint8_t *buf, uint16_t len, uint8_t *ck_a, uint8_t *ck_b)
 {
     uint8_t a = 0, b = 0;
     for (uint16_t i = 0; i < len; i++)
@@ -255,7 +257,7 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
     out->t_acc_ns        = rd_u32(&payload[PVT_TACC]);
     out->nano            = rd_i32(&payload[PVT_NANO]);
 
-    out->fix_type = payload[PVT_FIXTYPE];
+    out->fix_type = (ubx_fix_type_t)payload[PVT_FIXTYPE];
     out->fix_ok   = (payload[PVT_FLAGS] & PVT_FLAGS_GNSS_FIX_OK) != 0u;
     out->num_sv   = payload[PVT_NUMSV];
 
@@ -280,18 +282,16 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
     return true;
 }
 
-bool ubx_decode_ack(uint8_t msg_id, const uint8_t *payload, uint16_t len,
-                    uint8_t *acked_class, uint8_t *acked_id, bool *acknowledged)
+bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked)
 {
-    if (payload == NULL || acked_class == NULL || acked_id == NULL ||
-        acknowledged == NULL || len != UBX_ACK_LEN)
+    if (p == NULL || acked == NULL || p->msg_class != UBX_CLASS_ACK)
         return false;
-    if (msg_id != UBX_ID_ACK_ACK && msg_id != UBX_ID_ACK_NAK)
+    if (p->msg_id != UBX_ID_ACK_ACK && p->msg_id != UBX_ID_ACK_NAK)
+        return false;
+    if (p->len != UBX_ACK_LEN || p->payload[0] != cls || p->payload[1] != id)
         return false;
 
-    *acked_class   = payload[0];
-    *acked_id      = payload[1];
-    *acknowledged  = (msg_id == UBX_ID_ACK_ACK);
+    *acked = (p->msg_id == UBX_ID_ACK_ACK);
     return true;
 }
 
