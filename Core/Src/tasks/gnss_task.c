@@ -8,16 +8,16 @@
 
 #include "cmsis_os2.h"
 
-#include "flight/flight_data.h"
+#include "tasks/gnss_task.h"
 #include "gnss/max_m10s.h"
 
 #include <string.h>
 
 /*------------------------------------------------------------------- globals */
 
-gnss_fix_t      g_gnss_fix;        //zero-initialised at startup 
-osMutexId_t     g_gnss_mutex;
-osSemaphoreId_t g_gnss_idle_sem;  //binary semaphore, given from UART idle ISR 
+static gnss_fix_t      s_fix;        // zero-initialised at startup
+static osMutexId_t     s_fix_mutex;  // guards s_fix; NULL until gnss_task() starts
+static osSemaphoreId_t s_idle_sem;   // binary semaphore, given from UART idle ISR
 
 static gnss_driver_t s_drv;
 
@@ -28,7 +28,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
     (void)size;
     if (huart == &GNSS_HUART_HANDLE)
-        osSemaphoreRelease(g_gnss_idle_sem);
+        osSemaphoreRelease(s_idle_sem);
 }
 
 /* -------------------------------------------------------------- capture datum
@@ -41,14 +41,29 @@ void gnss_capture_datum(void)
     s_drv.capture_pending = true;
 }
 
+/* ----------------------------------------------------------------- get fix
+ *
+ * Non-blocking so a low-rate consumer (the logger) can never be stalled by the
+ * GNSS task holding the mutex. */
+bool gnss_get_fix(gnss_fix_t *out)
+{
+    if (out == NULL || s_fix_mutex == NULL)
+        return false;
+    if (osMutexAcquire(s_fix_mutex, 0) != osOK)
+        return false;
+    *out = s_fix;
+    osMutexRelease(s_fix_mutex);
+    return true;
+}
+
 /*-------------------------------------------------------------------- task */
 
 void gnss_task(void *arg)
 {
     (void)arg;
 
-    g_gnss_mutex    = osMutexNew(NULL); 
-    g_gnss_idle_sem = osSemaphoreNew(1, 0, NULL);
+    s_fix_mutex    = osMutexNew(NULL); 
+    s_idle_sem = osSemaphoreNew(1, 0, NULL);
 
     max_m10s_init(&s_drv);
 
@@ -61,7 +76,7 @@ void gnss_task(void *arg)
 
     for (;;)
     {
-        osSemaphoreAcquire(g_gnss_idle_sem, osWaitForever);
+        osSemaphoreAcquire(s_idle_sem, osWaitForever);
 
         while (max_m10s_drain(&s_drv))
         {
@@ -139,9 +154,9 @@ void gnss_task(void *arg)
                 snap.uart_overruns   = s_drv.uart_overruns;
 
                 // Publish under mutex. 
-                osMutexAcquire(g_gnss_mutex, osWaitForever);
-                g_gnss_fix = snap;
-                osMutexRelease(g_gnss_mutex);
+                osMutexAcquire(s_fix_mutex, osWaitForever);
+                s_fix = snap;
+                osMutexRelease(s_fix_mutex);
             }
         }
     }

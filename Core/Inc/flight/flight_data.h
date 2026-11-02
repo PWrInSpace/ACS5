@@ -3,16 +3,13 @@
  * This header defines the data types shared between the GNSS driver and the 
  * flight state machine.
  *
- * To use gnss_fix_t from another task:
- *
- *   #include "flight/flight_data.h"
+ * Pure data types, no RTOS dependency. To read the live fix from another
+ * task use gnss_get_fix() in "tasks/gnss_task.h".
  */
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
-
-#include "cmsis_os2.h"
 
 /* ------------------------------------------------------------------ GNSS */
 
@@ -106,18 +103,3 @@ typedef struct
     uint32_t uart_overruns;    /* UART peripheral overrun counter, from HAL */
 
 } gnss_fix_t;
-
-/*
- * Call once from the flight state machine when the rocket is on the launch pad. 
- * The driver will set the datum on the next valid frame 
- * and begin populating ned_m. Before this is called, ned_m is all
- * zeros and ned_valid is false.
- *
- * Defined in gnss_task.c.
- */
-void gnss_capture_datum(void);
-
-/* -------------------------------------------------- shared driver globals */
-
-extern gnss_fix_t    g_gnss_fix;
-extern osMutexId_t   g_gnss_mutex;

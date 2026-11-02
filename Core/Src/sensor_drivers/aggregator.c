@@ -10,6 +10,7 @@
 #include "servos/servo_t75.h"
 #endif
 #include "flight/flight_data.h"
+#include "tasks/gnss_task.h"
 #include "utils/mathx.h"
 #include "utils/timestamp.h"
 #include "spi.h"
@@ -528,18 +529,17 @@ void StartAggregator(void *argument)
             g_log.timestamp_ms = osKernelGetTickCount();
 
             /* GNSS snapshot for the CSV row (non-blocking; skip if contended). */
-            if (g_gnss_mutex != NULL &&
-                osMutexAcquire(g_gnss_mutex, 0) == osOK)
+            gnss_fix_t gnss;
+            if (gnss_get_fix(&gnss))
             {
-                g_log.gnss_fix_valid = g_gnss_fix.fix_valid;
-                g_log.gnss_num_sv     = g_gnss_fix.num_sv;
-                g_log.gnss_lat_1e7    = g_gnss_fix.lat_1e7;
-                g_log.gnss_lon_1e7    = g_gnss_fix.lon_1e7;
-                g_log.gnss_h_msl_mm   = g_gnss_fix.h_msl_mm;
-                memcpy(g_log.gnss_ned_m, g_gnss_fix.ned_m, sizeof(g_log.gnss_ned_m));
-                memcpy(g_log.gnss_vel_ned_mps, g_gnss_fix.vel_ned_mps,
+                g_log.gnss_fix_valid = gnss.fix_valid;
+                g_log.gnss_num_sv    = gnss.num_sv;
+                g_log.gnss_lat_1e7   = gnss.lat_1e7;
+                g_log.gnss_lon_1e7   = gnss.lon_1e7;
+                g_log.gnss_h_msl_mm  = gnss.h_msl_mm;
+                memcpy(g_log.gnss_ned_m, gnss.ned_m, sizeof(g_log.gnss_ned_m));
+                memcpy(g_log.gnss_vel_ned_mps, gnss.vel_ned_mps,
                        sizeof(g_log.gnss_vel_ned_mps));
-                osMutexRelease(g_gnss_mutex);
             }
 
             __DMB();  /* ensure all writes to g_log are visible before waking SD task */
