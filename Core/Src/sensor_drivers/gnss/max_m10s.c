@@ -5,9 +5,7 @@
  * the drain loop.
  */
 
-#if __has_include("stm32h7xx_hal.h")
 #include "stm32h7xx_hal.h"
-#endif
 
 #include "gnss/max_m10s.h"
 
@@ -34,6 +32,9 @@
 /* UART speed used after configuration; the module boots at 38400. */
 #define MAX_M10S_BAUD_FLIGHT    115200u
 
+/* Blocking HAL transmit timeout for one CFG-VALSET frame. */
+#define MAX_M10S_TX_TIMEOUT_MS  50u
+
 /* Per-message ACK timeout. */
 #define MAX_M10S_CFG_TIMEOUT_MS 200u
 
@@ -42,15 +43,14 @@
 
 /* ------------------------------------------------------------------ DMA buffer */
 
-static uint8_t s_dma_buf[MAX_M10S_DMA_BUF_LEN]
-    __attribute__((section(".dma_buf"), aligned(32)));
+static uint8_t s_dma_buf[MAX_M10S_DMA_BUF_LEN] ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
 
 
 /* -------------------------------------------------------------- CFG-VALSET ACK
  *
  * Sends one CFG-VALSET and waits for ACK-ACK or ACK-NAK. */
-static WARN_UNUSED max_m10s_status_t send_cfg_valset(uint32_t key, const uint8_t *val,
-                                                 uint8_t val_len)
+static max_m10s_status_t send_cfg_valset(uint32_t key, const uint8_t *val,
+                                         uint8_t val_len)
 {
     uint8_t payload[MAX_M10S_CFG_PAYLOAD_CAP];
     uint8_t frame[MAX_M10S_CFG_FRAME_CAP];
@@ -74,7 +74,8 @@ static WARN_UNUSED max_m10s_status_t send_cfg_valset(uint32_t key, const uint8_t
 
     for (uint8_t attempt = 0; attempt < MAX_M10S_CFG_RETRIES; attempt++)
     {
-        if (HAL_UART_Transmit(&MAX_M10S_HUART_HANDLE, frame, frame_len, 50u) != HAL_OK)
+        if (HAL_UART_Transmit(&MAX_M10S_HUART_HANDLE, frame, frame_len,
+                              MAX_M10S_TX_TIMEOUT_MS) != HAL_OK)
             return MAX_M10S_ERR_HAL;
 
         /* Snapshot write pointer; only newer bytes can belong to this ACK. */

@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "gnss/ubx_parse.h"
+#include "utils/attributes.h"
 
 
 typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
@@ -84,7 +85,7 @@ void max_m10s_init(max_m10s_driver_t *drv);
  * MAX_M10S_ERR_TIMEOUT on any failure. It is safe to retry on failure.
  *
  */
-max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
+WARN_UNUSED max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
 
 /*
  * max_m10s_drain - consume DMA bytes and feed them to the UBX parser.
