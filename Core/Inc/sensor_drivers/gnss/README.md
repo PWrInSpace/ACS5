@@ -62,8 +62,8 @@ The wire-format and HAL/RTOS layers are written and match this document, but
 none of the following has been done yet:
 
 1. **Schematic facts, still TBD**:
-   - **Which UART** — `GNSS_HUART_HANDLE` in `max_m10s.h` is a placeholder
-     (`#define GNSS_HUART_HANDLE huart3`). Update that one `#define` once the
+   - **Which UART** — `MAX_M10S_HUART_HANDLE` in `max_m10s.h` is a placeholder
+     (`#define MAX_M10S_HUART_HANDLE huart3`). Update that one `#define` once the
      schematic is final; no other file needs to change.
    - `VIO_SEL` level (1.8 V I/O would make a 3.3 V TX line destructive),
      `V_BCKP`, `RESET_N` on a GPIO, `TIMEPULSE` routing, antenna type and its

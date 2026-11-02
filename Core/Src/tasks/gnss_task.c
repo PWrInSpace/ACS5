@@ -19,7 +19,12 @@ static gnss_fix_t      s_fix;        // zero-initialised at startup
 static osMutexId_t     s_fix_mutex;  // guards s_fix; NULL until gnss_task() starts
 static osSemaphoreId_t s_idle_sem;   // binary semaphore, given from UART idle ISR
 
-static gnss_driver_t s_drv;
+static max_m10s_driver_t s_drv;
+
+/* NED datum and its capture request. Owned by this task; the request flag is
+ * set from another task by gnss_capture_datum(). */
+static ubx_datum_t   s_datum;
+static volatile bool s_capture_pending;
 
 /*--------------------------------------------------------------- idle callback */
 
@@ -27,18 +32,18 @@ static gnss_driver_t s_drv;
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
     (void)size;
-    if (huart == &GNSS_HUART_HANDLE)
+    if (huart == &MAX_M10S_HUART_HANDLE)
         osSemaphoreRelease(s_idle_sem);
 }
 
 /* -------------------------------------------------------------- capture datum
  *
  * Called by the flight state machine when the rocket is on the 
- * pad with a confirmed 3D fix. The driver applies 
- * the datum on the next valid frame. */
+ * pad with a confirmed 3D fix. The task latches
+ * the datum from the next valid fix. */
 void gnss_capture_datum(void)
 {
-    s_drv.capture_pending = true;
+    s_capture_pending = true;
 }
 
 /* ----------------------------------------------------------------- get fix
@@ -65,10 +70,11 @@ void gnss_task(void *arg)
     s_fix_mutex    = osMutexNew(NULL); 
     s_idle_sem = osSemaphoreNew(1, 0, NULL);
 
+    ubx_datum_clear(&s_datum);
     max_m10s_init(&s_drv);
 
-    gnss_status_t cfg = max_m10s_configure(&s_drv);
-    if (cfg != GNSS_OK)
+    max_m10s_status_t cfg = max_m10s_configure(&s_drv);
+    if (cfg != MAX_M10S_OK)
     {
         for (;;)
             osDelay(1000);
@@ -78,23 +84,23 @@ void gnss_task(void *arg)
     {
         osSemaphoreAcquire(s_idle_sem, osWaitForever);
 
-        while (max_m10s_drain(&s_drv))
+        max_m10s_frame_t frame;
+        while (max_m10s_drain(&s_drv, &frame))
         {
-            if (s_drv.parser.msg_class == UBX_CLASS_NAV &&
-                s_drv.parser.msg_id   == UBX_ID_NAV_PVT)
+            if (frame.msg_class == UBX_CLASS_NAV &&
+                frame.msg_id   == UBX_ID_NAV_PVT)
             {
                 ubx_nav_pvt_t pvt;
-                if (!ubx_decode_nav_pvt(s_drv.parser.payload,
-                                        s_drv.parser.len, &pvt))
+                if (!ubx_decode_nav_pvt(frame.payload, frame.len, &pvt))
                     continue;
 
                 /* Apply datum if pending and fix is valid. */
-                if (s_drv.capture_pending &&
+                if (s_capture_pending &&
                     pvt.fix_ok && pvt.fix_type >= UBX_FIX_3D)
                 {
-                    ubx_datum_set(&s_drv.datum,
+                    ubx_datum_set(&s_datum,
                                   pvt.lat_1e7, pvt.lon_1e7, pvt.height_mm);
-                    s_drv.capture_pending = false;
+                    s_capture_pending = false;
                 }
 
                 /* Build fix snapshot. */
@@ -138,20 +144,22 @@ void gnss_task(void *arg)
                 snap.p_dop            = pvt.p_dop;
 
                 /* NED from pad datum. */
-                if (s_drv.datum.valid && snap.fix_valid)
+                if (s_datum.valid && snap.fix_valid)
                 {
-                    ubx_geodetic_to_ned(&s_drv.datum,
+                    ubx_geodetic_to_ned(&s_datum,
                                         pvt.lat_1e7, pvt.lon_1e7,
                                         pvt.height_mm, snap.ned_m);
                     snap.ned_valid = true;
                 }
 
-                // Health counters from parser. 
-                snap.frames_ok       = s_drv.parser.frames_ok;
-                snap.checksum_errors = s_drv.parser.checksum_errors;
-                snap.resyncs         = s_drv.parser.resyncs;
-                snap.oversized       = s_drv.parser.oversized;
-                snap.uart_overruns   = s_drv.uart_overruns;
+                // Health counters from the driver.
+                max_m10s_stats_t stats;
+                max_m10s_get_stats(&s_drv, &stats);
+                snap.frames_ok       = stats.frames_ok;
+                snap.checksum_errors = stats.checksum_errors;
+                snap.resyncs         = stats.resyncs;
+                snap.oversized       = stats.oversized;
+                snap.uart_overruns   = stats.uart_overruns;
 
                 // Publish under mutex. 
                 osMutexAcquire(s_fix_mutex, osWaitForever);

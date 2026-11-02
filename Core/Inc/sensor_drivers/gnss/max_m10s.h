@@ -5,7 +5,7 @@
  * (gnss_task.c). It owns:
  *
  *   - the UART handle used by the STM32 HAL layer;
- *   - the driver state struct (gnss_driver_t), allocated statically in
+ *   - the driver state struct (max_m10s_driver_t), allocated statically in
  *     gnss_task.c so no heap is needed;
  *   - the public access and status codes used to configure, drain, and monitor
  *     the MAX-M10S.
@@ -25,55 +25,74 @@ typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
  *
  * ORC Meteor board port labeled TX6/RX6 on PE8/PE7 — silicon AF is UART7.
  */
-#define GNSS_HUART_HANDLE   huart7
-extern UART_HandleTypeDef GNSS_HUART_HANDLE;
+#define MAX_M10S_HUART_HANDLE   huart7
+extern UART_HandleTypeDef MAX_M10S_HUART_HANDLE;
 
 typedef enum
 {
-    GNSS_OK           = 0,   /* success */
-    GNSS_ERR_HAL      = 1,   /* STM32 HAL returned HAL_ERROR or HAL_TIMEOUT */
-    GNSS_ERR_NAK      = 2,   /* module replied ACK-NAK to a CFG-VALSET key */
-    GNSS_ERR_TIMEOUT  = 3,   /* no ACK after all retries */
-} gnss_status_t;
+    MAX_M10S_OK           = 0,   /* success */
+    MAX_M10S_ERR_HAL      = 1,   /* STM32 HAL returned HAL_ERROR or HAL_TIMEOUT */
+    MAX_M10S_ERR_NAK      = 2,   /* module replied ACK-NAK to a CFG-VALSET key */
+    MAX_M10S_ERR_TIMEOUT  = 3,   /* no ACK after all retries */
+} max_m10s_status_t;
 
-/* Driver state. */
+/* Driver state. Allocate one statically; all fields are private to the driver,
+ * use the functions below. */
 typedef struct
 {
-    //interprets the incoming UBX stream
+    /* Interprets the incoming UBX stream. */
     ubx_parser_t  parser;
 
-    /* [task] Current NED datum; set after a valid fix. */
-    ubx_datum_t   datum;
-
-    /* [task] Capture request flag. */
-    volatile bool capture_pending;
-
-    /* [internal] Ring read pointer, updated by max_m10s_drain(). */
+    /* Ring read pointer, updated by max_m10s_drain(). */
     uint16_t      read_pos;
 
-    /* [internal] Sticky UART ORE count. */
+    /* Sticky UART ORE count. */
     uint32_t      uart_overruns;
 
-} gnss_driver_t;
+} max_m10s_driver_t;
+
+/* One complete, checksum-verified UBX frame returned by max_m10s_drain(). */
+typedef struct
+{
+    uint8_t        msg_class;
+    uint8_t        msg_id;
+    uint16_t       len;       /* payload length in bytes */
+    const uint8_t *payload;   /* valid only until the next max_m10s_drain() call */
+} max_m10s_frame_t;
+
+/* Receive health counters. */
+typedef struct
+{
+    uint32_t frames_ok;
+    uint32_t checksum_errors;
+    uint32_t resyncs;
+    uint32_t oversized;
+    uint32_t uart_overruns;
+} max_m10s_stats_t;
 
 /*
  * max_m10s_init - zero driver state and start circular DMA at default baud.
  */
-void max_m10s_init(gnss_driver_t *drv);
+void max_m10s_init(max_m10s_driver_t *drv);
 
 /*
  * max_m10s_configure - send the full CFG-VALSET sequence and switch baud rate.
  *
  * Blocks until all six messages are ACKed or a failure is detected.
  *
- * Returns GNSS_OK if all six messages are ACKed. Returns GNSS_ERR_NAK or
- * GNSS_ERR_TIMEOUT on any failure. It is safe to retry on failure.
+ * Returns MAX_M10S_OK if all six messages are ACKed. Returns MAX_M10S_ERR_NAK or
+ * MAX_M10S_ERR_TIMEOUT on any failure. It is safe to retry on failure.
  *
  */
-gnss_status_t max_m10s_configure(gnss_driver_t *drv);
+max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
 
 /*
- * max_m10s_drain - consume DMA bytes, feed them to the UBX parser, and
- * report whether a complete frame was found.
+ * max_m10s_drain - consume DMA bytes and feed them to the UBX parser.
+ *
  */
-bool max_m10s_drain(gnss_driver_t *drv);
+bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame);
+
+/*
+ * max_m10s_get_stats - copy the receive health counters into *out.
+ */
+void max_m10s_get_stats(const max_m10s_driver_t *drv, max_m10s_stats_t *out);
