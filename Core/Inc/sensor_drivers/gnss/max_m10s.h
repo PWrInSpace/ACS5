@@ -4,8 +4,7 @@
  * This header is the contract between max_m10s.c and the FreeRTOS GNSS task
  * (gnss_task.c). It owns:
  *
- *   - the circular DMA receive buffer size and UART placeholder used by the
- *     STM32 HAL layer;
+ *   - the UART handle used by the STM32 HAL layer;
  *   - the driver state struct (gnss_driver_t), allocated statically in
  *     gnss_task.c so no heap is needed;
  *   - the public access and status codes used to configure, drain, and monitor
@@ -29,27 +28,12 @@ typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
 #define GNSS_HUART_HANDLE   huart7
 extern UART_HandleTypeDef GNSS_HUART_HANDLE;
 
-/* DMA RX ring size. */
-#define GNSS_DMA_BUF_LEN    512u
-
-
-#define GNSS_BAUD_DEFAULT   38400u
-
-#define GNSS_BAUD_FLIGHT    115200u
-
-/* Per-message ACK timeout. */
-#define GNSS_CFG_TIMEOUT_MS 200u
-
-/* Retry budget per key before failing configure(). */
-#define GNSS_CFG_RETRIES    3u
-
 typedef enum
 {
     GNSS_OK           = 0,   /* success */
     GNSS_ERR_HAL      = 1,   /* STM32 HAL returned HAL_ERROR or HAL_TIMEOUT */
     GNSS_ERR_NAK      = 2,   /* module replied ACK-NAK to a CFG-VALSET key */
-    GNSS_ERR_TIMEOUT  = 3,   /* no ACK within GNSS_CFG_TIMEOUT_MS × retries */
-    GNSS_ERR_OVERFLOW = 4,   /* UART peripheral overrun detected during config */
+    GNSS_ERR_TIMEOUT  = 3,   /* no ACK after all retries */
 } gnss_status_t;
 
 /* Driver state. */

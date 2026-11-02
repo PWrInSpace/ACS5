@@ -26,6 +26,20 @@
 /* CFG-VALSET RAM layer. */
 #define GNSS_CFG_LAYER_RAM 0x01u
 
+/* ------------------------------------------------------------ tuning constants */
+
+/* DMA RX ring size. */
+#define GNSS_DMA_BUF_LEN    512u
+
+/* UART speed used after configuration; the module boots at 38400. */
+#define GNSS_BAUD_FLIGHT    115200u
+
+/* Per-message ACK timeout. */
+#define GNSS_CFG_TIMEOUT_MS 200u
+
+/* Retry budget per key before failing configure(). */
+#define GNSS_CFG_RETRIES    3u
+
 /* ------------------------------------------------------------------ DMA buffer */
 
 static uint8_t s_dma_buf[GNSS_DMA_BUF_LEN]
