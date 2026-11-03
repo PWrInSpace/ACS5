@@ -47,8 +47,14 @@ typedef struct
     /* Ring read pointer, updated by max_m10s_drain(). */
     uint16_t      read_pos;
 
-    /* Sticky UART ORE count. */
-    uint32_t      uart_overruns;
+    /* Sticky counts of receive errors that aborted the DMA: overruns, and
+     * any other UART error (noise, framing, parity). Written from the UART
+     * error callback. */
+    volatile uint32_t uart_overruns;
+    volatile uint32_t uart_rx_errors;
+
+    /* Set by the UART error callback; max_m10s_drain() then restarts reception. */
+    volatile bool rx_restart_pending;
 
 } max_m10s_driver_t;
 
@@ -69,12 +75,16 @@ typedef struct
     uint32_t resyncs;
     uint32_t oversized;
     uint32_t uart_overruns;
+    uint32_t uart_rx_errors;
 } max_m10s_stats_t;
 
 /*
- * max_m10s_init - zero driver state and start circular DMA at default baud.
+ * max_m10s_init - zero driver state and start circular DMA at the UART's
+ * current baud.
+ *
+ * Returns MAX_M10S_OK, or MAX_M10S_ERR_HAL if the DMA could not be started.
  */
-void max_m10s_init(max_m10s_driver_t *drv);
+WARN_UNUSED max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv);
 
 /*
  * max_m10s_configure - send the full CFG-VALSET sequence and switch baud rate.
@@ -92,6 +102,16 @@ WARN_UNUSED max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
  *
  */
 bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame);
+
+/*
+ * max_m10s_on_uart_error - call from HAL_UART_ErrorCallback() for the GNSS UART.
+ *
+ * A receive error aborts the HAL's DMA transfer, so reception stops until it is
+ * restarted. This only counts the error and flags the restart, so it is safe in
+ * interrupt context; the next max_m10s_drain() restarts the DMA, resynchronises
+ * the ring pointer and parser. The caller must wake whatever calls drain().
+ */
+void max_m10s_on_uart_error(max_m10s_driver_t *drv);
 
 /*
  * max_m10s_get_stats - copy the receive health counters into *out.

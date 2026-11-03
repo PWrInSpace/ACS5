@@ -65,6 +65,10 @@ typedef struct
 
 void ubx_parser_init(ubx_parser_t *p);
 
+/* Abandons the frame in progress and resumes hunting for a sync pair. Unlike
+ * ubx_parser_init() it keeps the health counters (and counts a resync). */
+void ubx_parser_resync(ubx_parser_t *p);
+
 /* Feeds one received byte. Returns true exactly when a complete frame with a
  * valid checksum is available.
  */
@@ -144,9 +148,7 @@ typedef struct
     float   m_per_deg_lat;   /* meridian radius at lat_1e7*/
     float   m_per_deg_lon;   /* prime-vertical radius times cos(lat)*/
     bool    valid;
-} ubx_datum_t;
-
-void ubx_datum_clear(ubx_datum_t *d);
+} ubx_datum_t;   /* all-zero (e.g. a static) is an unset datum: valid == false */
 
 
 void ubx_datum_set(ubx_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,

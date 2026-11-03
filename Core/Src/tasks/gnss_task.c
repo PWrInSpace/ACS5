@@ -21,8 +21,11 @@ static osSemaphoreId_t s_idle_sem;   // binary semaphore, given from UART idle I
 
 static max_m10s_driver_t s_drv;
 
+#define GNSS_TASK_WAKE_TIMEOUT_MS 1000u
+
 /* NED datum and its capture request. Owned by this task; the request flag is
- * set from another task by gnss_capture_datum(). */
+ * set from another task by gnss_capture_datum(). Zero-initialised, so the datum
+ * starts out invalid. */
 static ubx_datum_t   s_datum;
 static volatile bool s_capture_pending;
 
@@ -34,6 +37,18 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
     (void)size;
     if (huart == &MAX_M10S_HUART_HANDLE)
         osSemaphoreRelease(s_idle_sem);
+}
+
+// The HAL calls this after a UART receive error (overrun, noise, framing...). It
+// has already aborted the DMA, so no idle event will ever come again unless the
+// driver restarts reception: flag it and wake the task to do so.
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart == &MAX_M10S_HUART_HANDLE)
+    {
+        max_m10s_on_uart_error(&s_drv);
+        osSemaphoreRelease(s_idle_sem);
+    }
 }
 
 /* -------------------------------------------------------------- capture datum
@@ -70,10 +85,9 @@ void gnss_task(void *arg)
     s_fix_mutex    = osMutexNew(NULL); 
     s_idle_sem = osSemaphoreNew(1, 0, NULL);
 
-    ubx_datum_clear(&s_datum);
-    max_m10s_init(&s_drv);
-
-    max_m10s_status_t cfg = max_m10s_configure(&s_drv);
+    max_m10s_status_t cfg = max_m10s_init(&s_drv);
+    if (cfg == MAX_M10S_OK)
+        cfg = max_m10s_configure(&s_drv);
     if (cfg != MAX_M10S_OK)
     {
         for (;;)
@@ -82,7 +96,9 @@ void gnss_task(void *arg)
 
     for (;;)
     {
-        osSemaphoreAcquire(s_idle_sem, osWaitForever);
+        // Timeout so that a failed receive restart is retried even though no
+        // event arrives while the DMA is stopped.
+        (void)osSemaphoreAcquire(s_idle_sem, GNSS_TASK_WAKE_TIMEOUT_MS);
 
         max_m10s_frame_t frame;
         while (max_m10s_drain(&s_drv, &frame))

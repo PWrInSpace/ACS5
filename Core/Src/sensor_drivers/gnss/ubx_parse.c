@@ -51,7 +51,7 @@ void ubx_parser_init(ubx_parser_t *p)
 }
 
 /* Abandons the frame in progress and resumes hunting for a sync pair. */
-static void resync(ubx_parser_t *p)
+void ubx_parser_resync(ubx_parser_t *p)
 {
     p->resyncs++;
     p->state = UBX_ST_SYNC1;
@@ -116,7 +116,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
              * UBX_MAX_PAYLOAD comment for why both resync rather than skip. */
 
             p->oversized++;
-            resync(p);
+            ubx_parser_resync(p);
         }
         else
         {
@@ -137,7 +137,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
         if (b != p->ck_a)
         {
             p->checksum_errors++;
-            resync(p);
+            ubx_parser_resync(p);
             break;
         }
         p->state = UBX_ST_CK_B;
@@ -157,7 +157,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 
     default:
         /* Recover from a corrupted state instead of hanging the parser. */
-        resync(p);
+        ubx_parser_resync(p);
         break;
     }
 
@@ -302,11 +302,6 @@ bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked)
 #define WGS84_A  6378137.0
 #define WGS84_E2 0.00669437999014
 #define DEG2RAD  0.017453292519943295
-
-void ubx_datum_clear(ubx_datum_t *d)
-{
-    memset(d, 0, sizeof(*d));
-}
 
 void ubx_datum_set(ubx_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,
                    int32_t height_mm)
