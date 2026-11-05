@@ -533,12 +533,12 @@ void StartAggregator(void *argument)
             if (gnss_get_fix(&gnss))
             {
                 g_log.gnss_fix_valid = gnss.fix_valid;
-                g_log.gnss_num_sv    = gnss.num_sv;
-                g_log.gnss_lat_1e7   = gnss.lat_1e7;
-                g_log.gnss_lon_1e7   = gnss.lon_1e7;
-                g_log.gnss_h_msl_mm  = gnss.h_msl_mm;
+                g_log.gnss_num_sv    = gnss.pvt.num_sv;
+                g_log.gnss_lat_1e7   = gnss.pvt.lat_1e7;
+                g_log.gnss_lon_1e7   = gnss.pvt.lon_1e7;
+                g_log.gnss_h_msl_mm  = gnss.pvt.h_msl_mm;
                 memcpy(g_log.gnss_ned_m, gnss.ned_m, sizeof(g_log.gnss_ned_m));
-                memcpy(g_log.gnss_vel_ned_mps, gnss.vel_ned_mps,
+                memcpy(g_log.gnss_vel_ned_mps, gnss.pvt.vel_ned_mps,
                        sizeof(g_log.gnss_vel_ned_mps));
             }
 

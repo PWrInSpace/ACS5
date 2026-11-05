@@ -16,18 +16,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "gnss/ubx_parse.h"
+#include "sensor_drivers/gnss/ubx_parse.h"
 #include "utils/attributes.h"
 
 
 typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
-
-/* ---------------------------------------------------------- UART
- *
- * ORC Meteor board port labeled TX6/RX6 on PE8/PE7 — silicon AF is UART7.
- */
-#define MAX_M10S_HUART_HANDLE   huart7
-extern UART_HandleTypeDef MAX_M10S_HUART_HANDLE;
 
 typedef enum
 {
@@ -41,6 +34,9 @@ typedef enum
  * use the functions below. */
 typedef struct
 {
+    /* The UART the module is wired to; given to max_m10s_init(). */
+    UART_HandleTypeDef *huart;
+
     /* Interprets the incoming UBX stream. */
     ubx_parser_t  parser;
 
@@ -70,21 +66,22 @@ typedef struct
 /* Receive health counters. */
 typedef struct
 {
-    uint32_t frames_ok;
-    uint32_t checksum_errors;
-    uint32_t resyncs;
-    uint32_t oversized;
-    uint32_t uart_overruns;
-    uint32_t uart_rx_errors;
+    ubx_stats_t parser;      /* frames received, checksum errors, resyncs, ... */
+    uint32_t    uart_overruns;
+    uint32_t    uart_rx_errors;
 } max_m10s_stats_t;
 
 /*
- * max_m10s_init - zero driver state and start circular DMA at the UART's
- * current baud.
+ * max_m10s_init - zero driver state, remember which UART the module is on, and
+ * start circular DMA at that UART's current baud.
+ *
+ * The UART must already be initialised (with a DMA channel linked for RX), and
+ * the driver owns its receive from here on.
  *
  * Returns MAX_M10S_OK, or MAX_M10S_ERR_HAL if the DMA could not be started.
  */
-WARN_UNUSED max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv);
+WARN_UNUSED max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv,
+                                            UART_HandleTypeDef *huart);
 
 /*
  * max_m10s_configure - send the full CFG-VALSET sequence and switch baud rate.
@@ -97,19 +94,11 @@ WARN_UNUSED max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv);
  */
 WARN_UNUSED max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
 
-/*
- * max_m10s_drain - consume DMA bytes and feed them to the UBX parser.
- *
- */
+/* max_m10s_drain - consume DMA bytes and feed them to the UBX parser.  */
 bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame);
 
 /*
  * max_m10s_on_uart_error - call from HAL_UART_ErrorCallback() for the GNSS UART.
- *
- * A receive error aborts the HAL's DMA transfer, so reception stops until it is
- * restarted. This only counts the error and flags the restart, so it is safe in
- * interrupt context; the next max_m10s_drain() restarts the DMA, resynchronises
- * the ring pointer and parser. The caller must wake whatever calls drain().
  */
 void max_m10s_on_uart_error(max_m10s_driver_t *drv);
 

@@ -1,7 +1,7 @@
 /*
  * ACS5 - u-blox UBX protocol.
  */
-#include "gnss/ubx_parse.h"
+#include "sensor_drivers/gnss/ubx_parse.h"
 
 #include <assert.h>
 #include <string.h>
@@ -58,7 +58,7 @@ void ubx_parser_init(ubx_parser_t *p)
 void ubx_parser_resync(ubx_parser_t *p)
 {
     assert(p != NULL);
-    p->resyncs++;
+    p->stats.resyncs++;
     p->state = UBX_ST_SYNC1;
 }
 
@@ -120,7 +120,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
             /* Either an unsupported message or a corrupt header; see the
              * UBX_MAX_PAYLOAD comment for why both resync rather than skip. */
 
-            p->oversized++;
+            p->stats.oversized++;
             ubx_parser_resync(p);
         }
         else
@@ -140,7 +140,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
     case UBX_ST_CK_A:
         if (b != p->ck_a)
         {
-            p->checksum_errors++;
+            p->stats.checksum_errors++;
             ubx_parser_resync(p);
             break;
         }
@@ -150,12 +150,12 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
     case UBX_ST_CK_B:
         if (b != p->ck_b)
         {
-            p->checksum_errors++;
+            p->stats.checksum_errors++;
             ubx_parser_resync(p);
             break;
         }
         p->state = UBX_ST_SYNC1;
-        p->frames_ok++;
+        p->stats.frames_ok++;
         return true;
 
     default:
@@ -287,6 +287,14 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
     out->p_dop            = (float)rd_u16(&payload[PVT_PDOP]) * 0.01f;
 
     return true;
+}
+
+bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt)
+{
+    assert(pvt != NULL);
+
+    return pvt->fix_ok &&
+           (pvt->fix_type == UBX_FIX_3D || pvt->fix_type == UBX_FIX_GNSS_DR);
 }
 
 bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked)

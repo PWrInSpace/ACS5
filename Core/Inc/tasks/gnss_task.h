@@ -10,8 +10,25 @@
 
 #include "flight/flight_data.h"
 
-/* FreeRTOS task entry point. */
+typedef struct __UART_HandleTypeDef UART_HandleTypeDef;
+
+/*
+ * gnss_init - create the task's RTOS objects (fix mutex, wake-up semaphore) and
+ * remember the UART the MAX-M10S is connected to, which must already be
+ * initialised with its receive DMA linked.
+ */
+bool gnss_init(UART_HandleTypeDef *huart);
+
+/* FreeRTOS task entry point. Started after a successful gnss_init(); no argument. */
 void gnss_task(void *arg);
+
+/*
+ * UART event hooks. The HAL has a single, global definition of each UART
+ * callback, so the application's central one (usart.c) forwards the events here.
+ * Interrupt-safe; they do nothing for a UART other than the GNSS one.
+ */
+void gnss_task_on_uart_rx_event(UART_HandleTypeDef *huart);
+void gnss_task_on_uart_error(UART_HandleTypeDef *huart);
 
 /*
  * gnss_get_fix - copy the latest published fix into *out.
@@ -19,9 +36,6 @@ void gnss_task(void *arg);
  * Never blocks. Returns false, leaving *out untouched, if the GNSS task has
  * not started yet or the snapshot is being written at this instant; the caller
  * should keep its previous value and try again on its next cycle.
- *
- * A true return only means *out is a consistent snapshot. Check out->fix_valid
- * and out->ned_valid before using the position, both are normal to be false.
  */
 bool gnss_get_fix(gnss_fix_t *out);
 

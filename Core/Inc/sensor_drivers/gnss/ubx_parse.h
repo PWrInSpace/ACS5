@@ -58,6 +58,15 @@ typedef enum
     UBX_ST_CK_B,
 } ubx_state_t;
 
+/* Parser health counters; all only ever increase. */
+typedef struct
+{
+    uint32_t frames_ok;
+    uint32_t checksum_errors;
+    uint32_t resyncs;        /* hunts restarted after a malformed frame */
+    uint32_t oversized;
+} ubx_stats_t;
+
 typedef struct
 {
     ubx_state_t state;       /* frame-parsing state machine position */
@@ -68,11 +77,7 @@ typedef struct
     uint8_t  ck_a, ck_b;
     uint8_t  payload[UBX_MAX_PAYLOAD];
 
-    /* Health counters: */
-    uint32_t frames_ok;
-    uint32_t checksum_errors;
-    uint32_t resyncs;        /* hunts restarted after a malformed frame */
-    uint32_t oversized;
+    ubx_stats_t stats;
 } ubx_parser_t;
 
 void ubx_parser_init(ubx_parser_t *p);
@@ -144,6 +149,11 @@ typedef struct
 
 
 bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out);
+
+/* True if the solution carries a usable position: the receiver flags it valid
+ * (fix_ok) and it is a 3D fix or GNSS + dead reckoning. 2D, dead reckoning alone
+ * and time-only fixes do not qualify (time-only has no position at all). */
+bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt);
 
 /* True if the frame just completed in *p is an ACK-ACK or ACK-NAK answering the
  * message (cls, id). On true, *acked is true for an ACK and false for a NAK.
