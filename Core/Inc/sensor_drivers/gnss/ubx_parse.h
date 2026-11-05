@@ -1,10 +1,13 @@
 /*
  * ACS5 - u-blox UBX protocol, platform-independent layer.
  *
- * Frame state machine, Fletcher-8 checksum, UBX-NAV-PVT decode, frame
- * construction for the configuration messages, and the geodetic-to-local-NED
- * conversion.
+ * Frame state machine, Fletcher-8 checksum, UBX-NAV-PVT decode and frame
+ * construction for the configuration messages.
  *
+ * Pointer arguments must not be NULL. Callers pass static or stack objects, so
+ * this is checked with assert() rather than at run time; data-dependent
+ * problems (short payload, buffer too small, invalid datum) are reported through
+ * the return value instead.
  */
 #pragma once
 
@@ -28,8 +31,17 @@
 #define UBX_NAV_PVT_LEN 92u
 #define UBX_ACK_LEN      2u
 
-/* Framing overhead: 2 sync + class + id + 2 length + 2 checksum. */
-#define UBX_FRAME_OVERHEAD 8u
+/* Frame layout: sync1 sync2 class id len_lo len_hi | payload | ck_a ck_b */
+#define UBX_OFS_SYNC1    0u
+#define UBX_OFS_SYNC2    1u
+#define UBX_OFS_CLASS    2u
+#define UBX_OFS_ID       3u
+#define UBX_OFS_LEN      4u   /* 16-bit little-endian payload length */
+#define UBX_OFS_PAYLOAD  6u   /* the checksum follows the payload */
+#define UBX_CHECKSUM_LEN 2u
+
+/* Framing overhead: everything but the payload. */
+#define UBX_FRAME_OVERHEAD (UBX_OFS_PAYLOAD + UBX_CHECKSUM_LEN)
 
 #define UBX_MAX_PAYLOAD UBX_NAV_PVT_LEN
 
@@ -137,24 +149,3 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
  * message (cls, id). On true, *acked is true for an ACK and false for a NAK.
  * Call right after ubx_parse_byte() returns true. */
 bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked);
-
-/* ------------------------------------------------------------- local NED */
-
-typedef struct
-{
-    int32_t lat_1e7;
-    int32_t lon_1e7;
-    int32_t height_mm;
-    float   m_per_deg_lat;   /* meridian radius at lat_1e7*/
-    float   m_per_deg_lon;   /* prime-vertical radius times cos(lat)*/
-    bool    valid;
-} ubx_datum_t;   /* all-zero (e.g. a static) is an unset datum: valid == false */
-
-
-void ubx_datum_set(ubx_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,
-                   int32_t height_mm);
-
-
-void ubx_geodetic_to_ned(const ubx_datum_t *d,
-                         int32_t lat_1e7, int32_t lon_1e7, int32_t height_mm,
-                         float out_ned_m[3]);

@@ -10,8 +10,7 @@
 
 #include "tasks/gnss_task.h"
 #include "gnss/max_m10s.h"
-
-#include <string.h>
+#include "utils/geo_ned.h"
 
 /*------------------------------------------------------------------- globals */
 
@@ -26,7 +25,7 @@ static max_m10s_driver_t s_drv;
 /* NED datum and its capture request. Owned by this task; the request flag is
  * set from another task by gnss_capture_datum(). Zero-initialised, so the datum
  * starts out invalid. */
-static ubx_datum_t   s_datum;
+static geo_ned_datum_t   s_datum;
 static volatile bool s_capture_pending;
 
 /*--------------------------------------------------------------- idle callback */
@@ -114,14 +113,13 @@ void gnss_task(void *arg)
                 if (s_capture_pending &&
                     pvt.fix_ok && pvt.fix_type >= UBX_FIX_3D)
                 {
-                    ubx_datum_set(&s_datum,
+                    geo_ned_datum_set(&s_datum,
                                   pvt.lat_1e7, pvt.lon_1e7, pvt.height_mm);
                     s_capture_pending = false;
                 }
 
                 /* Build fix snapshot. */
-                gnss_fix_t snap;
-                memset(&snap, 0, sizeof(snap));
+                gnss_fix_t snap = {0};
 
                 snap.timestamp_ms = HAL_GetTick();
                 snap.fix_valid    = pvt.fix_ok && (pvt.fix_type >= UBX_FIX_3D);
@@ -162,9 +160,9 @@ void gnss_task(void *arg)
                 /* NED from pad datum. */
                 if (s_datum.valid && snap.fix_valid)
                 {
-                    ubx_geodetic_to_ned(&s_datum,
-                                        pvt.lat_1e7, pvt.lon_1e7,
-                                        pvt.height_mm, snap.ned_m);
+                    geo_ned_from_geodetic(&s_datum,
+                                          pvt.lat_1e7, pvt.lon_1e7,
+                                          pvt.height_mm, snap.ned_m);
                     snap.ned_valid = true;
                 }
 

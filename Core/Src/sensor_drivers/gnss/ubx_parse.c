@@ -3,7 +3,7 @@
  */
 #include "gnss/ubx_parse.h"
 
-#include <math.h>
+#include <assert.h>
 #include <string.h>
 
 /* ------------------------------------------------------------ little endian */
@@ -28,24 +28,28 @@ static int32_t rd_i32(const uint8_t *p)
 
 /* ------------------------------------------------------------------ checksum */
 
+/* One Fletcher-8 step: fold byte `b` into the running sums. */
+static void ck_step(uint8_t *ck_a, uint8_t *ck_b, uint8_t b)
+{
+    *ck_a = (uint8_t)(*ck_a + b);
+    *ck_b = (uint8_t)(*ck_b + *ck_a);
+}
+
 /* Fletcher-8 over buf[0..len). Only used to build outgoing frames; the parser
- * accumulates the same sum incrementally as bytes arrive. */
+ * folds each received byte in with ck_step() as it arrives. */
 static void ubx_checksum(const uint8_t *buf, uint16_t len, uint8_t *ck_a, uint8_t *ck_b)
 {
-    uint8_t a = 0, b = 0;
+    *ck_a = 0;
+    *ck_b = 0;
     for (uint16_t i = 0; i < len; i++)
-    {
-        a = (uint8_t)(a + buf[i]);
-        b = (uint8_t)(b + a);
-    }
-    *ck_a = a;
-    *ck_b = b;
+        ck_step(ck_a, ck_b, buf[i]);
 }
 
 /* ------------------------------------------------------------------- framing */
 
 void ubx_parser_init(ubx_parser_t *p)
 {
+    assert(p != NULL);
     memset(p, 0, sizeof(*p));
     p->state = UBX_ST_SYNC1;
 }
@@ -53,12 +57,15 @@ void ubx_parser_init(ubx_parser_t *p)
 /* Abandons the frame in progress and resumes hunting for a sync pair. */
 void ubx_parser_resync(ubx_parser_t *p)
 {
+    assert(p != NULL);
     p->resyncs++;
     p->state = UBX_ST_SYNC1;
 }
 
 bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 {
+    assert(p != NULL);
+
     switch (p->state)
     {
     case UBX_ST_SYNC1:
@@ -85,29 +92,27 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 
     case UBX_ST_CLASS:
         p->msg_class = b;
-        p->ck_a      = b;
-        p->ck_b      = b;
+        p->ck_a      = 0;
+        p->ck_b      = 0;
+        ck_step(&p->ck_a, &p->ck_b, b);
         p->state     = UBX_ST_ID;
         break;
 
     case UBX_ST_ID:
         p->msg_id = b;
-        p->ck_a   = (uint8_t)(p->ck_a + b);
-        p->ck_b   = (uint8_t)(p->ck_b + p->ck_a);
+        ck_step(&p->ck_a, &p->ck_b, b);
         p->state  = UBX_ST_LEN_LO;
         break;
 
     case UBX_ST_LEN_LO:
         p->len   = b;
-        p->ck_a  = (uint8_t)(p->ck_a + b);
-        p->ck_b  = (uint8_t)(p->ck_b + p->ck_a);
+        ck_step(&p->ck_a, &p->ck_b, b);
         p->state = UBX_ST_LEN_HI;
         break;
 
     case UBX_ST_LEN_HI:
         p->len  = (uint16_t)(p->len | ((uint16_t)b << 8));
-        p->ck_a = (uint8_t)(p->ck_a + b);
-        p->ck_b = (uint8_t)(p->ck_b + p->ck_a);
+        ck_step(&p->ck_a, &p->ck_b, b);
         p->idx  = 0;
 
         if (p->len > UBX_MAX_PAYLOAD)
@@ -127,8 +132,7 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 
     case UBX_ST_PAYLOAD:
         p->payload[p->idx++] = b;
-        p->ck_a              = (uint8_t)(p->ck_a + b);
-        p->ck_b              = (uint8_t)(p->ck_b + p->ck_a);
+        ck_step(&p->ck_a, &p->ck_b, b);
         if (p->idx >= p->len)
             p->state = UBX_ST_CK_A;
         break;
@@ -144,14 +148,13 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
         break;
 
     case UBX_ST_CK_B:
-        p->state = UBX_ST_SYNC1;
         if (b != p->ck_b)
         {
             p->checksum_errors++;
-            /* The frame started but was invalid. */
-            p->resyncs++;
+            ubx_parser_resync(p);
             break;
         }
+        p->state = UBX_ST_SYNC1;
         p->frames_ok++;
         return true;
 
@@ -169,25 +172,29 @@ uint16_t ubx_frame_build(uint8_t *out, uint16_t out_cap,
                          const uint8_t *payload, uint16_t payload_len)
 {
     const uint32_t total = (uint32_t)payload_len + UBX_FRAME_OVERHEAD;
-    if (out == NULL || total > out_cap)
-        return 0;
-    if (payload_len > 0u && payload == NULL)
+    assert(out != NULL);
+    assert(payload_len == 0u || payload != NULL);
+
+    if (total > out_cap)
         return 0;
 
-    out[0] = UBX_SYNC1;
-    out[1] = UBX_SYNC2;
-    out[2] = msg_class;
-    out[3] = msg_id;
-    out[4] = (uint8_t)(payload_len & 0xFFu);
-    out[5] = (uint8_t)(payload_len >> 8);
+    out[UBX_OFS_SYNC1]   = UBX_SYNC1;
+    out[UBX_OFS_SYNC2]   = UBX_SYNC2;
+    out[UBX_OFS_CLASS]   = msg_class;
+    out[UBX_OFS_ID]      = msg_id;
+    out[UBX_OFS_LEN]     = (uint8_t)(payload_len & 0xFFu);
+    out[UBX_OFS_LEN + 1u] = (uint8_t)(payload_len >> 8);
     if (payload_len > 0u)
-        memcpy(&out[6], payload, payload_len);
+        memcpy(&out[UBX_OFS_PAYLOAD], payload, payload_len);
 
+    /* The checksum covers class .. payload, i.e. everything after the sync
+     * pair and before the checksum itself, and is stored right after the payload. */
+    const uint16_t ck_pos = (uint16_t)(UBX_OFS_PAYLOAD + payload_len);
     uint8_t ck_a, ck_b;
-    /* Class..payload inclusive, i.e. everything after the sync pair. */
-    ubx_checksum(&out[2], (uint16_t)(payload_len + 4u), &ck_a, &ck_b);
-    out[6 + payload_len] = ck_a;
-    out[7 + payload_len] = ck_b;
+    ubx_checksum(&out[UBX_OFS_CLASS],
+                 (uint16_t)(ck_pos - UBX_OFS_CLASS), &ck_a, &ck_b);
+    out[ck_pos]      = ck_a;
+    out[ck_pos + 1u] = ck_b;
 
     return (uint16_t)total;
 }
@@ -236,10 +243,10 @@ enum
 
 bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out)
 {
-    if (payload == NULL || out == NULL || len != UBX_NAV_PVT_LEN)
-        return false;
+    assert(payload != NULL && out != NULL);
 
-    memset(out, 0, sizeof(*out));
+    if (len != UBX_NAV_PVT_LEN)
+        return false;
 
     out->itow_ms = rd_u32(&payload[PVT_ITOW]);
 
@@ -284,7 +291,9 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
 
 bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked)
 {
-    if (p == NULL || acked == NULL || p->msg_class != UBX_CLASS_ACK)
+    assert(p != NULL && acked != NULL);
+
+    if (p->msg_class != UBX_CLASS_ACK)
         return false;
     if (p->msg_id != UBX_ID_ACK_ACK && p->msg_id != UBX_ID_ACK_NAK)
         return false;
@@ -293,60 +302,4 @@ bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked)
 
     *acked = (p->msg_id == UBX_ID_ACK_ACK);
     return true;
-}
-
-/* ------------------------------------------------------------- local NED */
-
-/* WGS-84 constants used for local NED conversion
-* WGS-84. e2 = 2f - f^2 for f = 1/298.257223563. */
-#define WGS84_A  6378137.0
-#define WGS84_E2 0.00669437999014
-#define DEG2RAD  0.017453292519943295
-
-void ubx_datum_set(ubx_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,
-                   int32_t height_mm)
-{
-    d->lat_1e7   = lat_1e7;
-    d->lon_1e7   = lon_1e7;
-    d->height_mm = height_mm;
-
-    /* Compute the scale factors once; they are reused for every fix. */
-    const double lat_rad = (double)lat_1e7 * 1e-7 * DEG2RAD;
-    const double s       = sin(lat_rad);
-    const double w       = 1.0 - WGS84_E2 * s * s;
-    const double sqrt_w  = sqrt(w);
-
-    /* Meridian radius of curvature (north) and prime-vertical radius (east). */
-    const double m_radius = WGS84_A * (1.0 - WGS84_E2) / (w * sqrt_w);
-    const double n_radius = WGS84_A / sqrt_w;
-
-    d->m_per_deg_lat = (float)(m_radius * DEG2RAD);
-    d->m_per_deg_lon = (float)(n_radius * cos(lat_rad) * DEG2RAD);
-    d->valid         = true;
-}
-
-void ubx_geodetic_to_ned(const ubx_datum_t *d,
-                         int32_t lat_1e7, int32_t lon_1e7, int32_t height_mm,
-                         float out_ned_m[3])
-{
-    if (d == NULL || out_ned_m == NULL)
-        return;
-
-    if (!d->valid)
-    {
-        out_ned_m[0] = 0.0f;
-        out_ned_m[1] = 0.0f;
-        out_ned_m[2] = 0.0f;
-        return;
-    }
-
-    // The differences are taken as integers so no precision is lost before the scaling. 
-    const int64_t dlat = (int64_t)lat_1e7 - (int64_t)d->lat_1e7;
-    const int64_t dlon = (int64_t)lon_1e7 - (int64_t)d->lon_1e7;
-    const int64_t dh   = (int64_t)height_mm - (int64_t)d->height_mm;
-
-    out_ned_m[0] = (float)((double)dlat * 1e-7) * d->m_per_deg_lat;
-    out_ned_m[1] = (float)((double)dlon * 1e-7) * d->m_per_deg_lon;
-    /* Down is positive, so a height gain is negative D. */
-    out_ned_m[2] = -(float)((double)dh * 1e-3);
 }
