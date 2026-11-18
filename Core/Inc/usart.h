@@ -10,6 +10,7 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+/* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __USART_H__
 #define __USART_H__
 
@@ -17,16 +18,28 @@
 extern "C" {
 #endif
 
+/* Includes ------------------------------------------------------------------*/
 #include "main.h"
 
-extern UART_HandleTypeDef huart7;
-extern DMA_HandleTypeDef  hdma_uart7_rx;
+/* USER CODE BEGIN Includes */
 
-void MX_DMA_Init(void);
+/* USER CODE END Includes */
+
+extern UART_HandleTypeDef huart7;
+
+/* USER CODE BEGIN Private defines */
+
+/* USER CODE END Private defines */
+
 void MX_UART7_Init(void);
+
+/* USER CODE BEGIN Prototypes */
+extern DMA_HandleTypeDef hdma_uart7_rx;
+/* USER CODE END Prototypes */
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* __USART_H__ */
+

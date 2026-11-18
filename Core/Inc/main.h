@@ -8,6 +8,7 @@
   */
 /* USER CODE END Header */
 
+/* Define to prevent recursive inclusion -------------------------------------*/
 #ifndef __MAIN_H
 #define __MAIN_H
 
@@ -15,54 +16,74 @@
 extern "C" {
 #endif
 
+/* Includes ------------------------------------------------------------------*/
 #include "stm32h7xx_hal.h"
 
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
 /* USER CODE END Includes */
 
+/* Exported types ------------------------------------------------------------*/
+/* USER CODE BEGIN ET */
+
+/* USER CODE END ET */
+
+/* Exported constants --------------------------------------------------------*/
+/* USER CODE BEGIN EC */
+
+/* USER CODE END EC */
+
+/* Exported macro ------------------------------------------------------------*/
+/* USER CODE BEGIN EM */
+
+/* USER CODE END EM */
+
+/* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
+/* USER CODE BEGIN EFP */
+
+/* USER CODE END EFP */
+
 /* Private defines -----------------------------------------------------------*/
-/* ORC Meteor (see ORC_Meteor.pdf MCU sheet) */
-#define SD_DETECT_Pin GPIO_PIN_0
-#define SD_DETECT_GPIO_Port GPIOD
-
-#define LD1_Pin GPIO_PIN_8          /* LED_1 */
-#define LD1_GPIO_Port GPIOA
-#define LD2_Pin GPIO_PIN_4          /* LED_2 */
+#define CAM2_Pin GPIO_PIN_1
+#define CAM2_GPIO_Port GPIOC
+#define LD2_Pin GPIO_PIN_4
 #define LD2_GPIO_Port GPIOA
-#define LD3_Pin GPIO_PIN_8          /* only two status LEDs on Meteor; alias LD1 */
-#define LD3_GPIO_Port GPIOA
-
 #define MAG_CS_Pin GPIO_PIN_8
 #define MAG_CS_GPIO_Port GPIOD
+#define MAG_INT_Pin GPIO_PIN_9
+#define MAG_INT_GPIO_Port GPIOD
 #define BARO_CS_Pin GPIO_PIN_10
 #define BARO_CS_GPIO_Port GPIOD
-#define IMU_CS_Pin GPIO_PIN_13
-#define IMU_CS_GPIO_Port GPIOD
-
 #define IMU_INT1_Pin GPIO_PIN_11
 #define IMU_INT1_GPIO_Port GPIOD
 #define IMU_INT2_Pin GPIO_PIN_12
 #define IMU_INT2_GPIO_Port GPIOD
-#define MAG_INT_Pin GPIO_PIN_9
-#define MAG_INT_GPIO_Port GPIOD
-
-/* SPLIT V3 camera power: MOSFET gate HIGH = camera on */
-#define CAM1_Pin GPIO_PIN_0
-#define CAM1_GPIO_Port GPIOC
-#define CAM2_Pin GPIO_PIN_1
-#define CAM2_GPIO_Port GPIOC
-#define CAM3_Pin GPIO_PIN_2
-#define CAM3_GPIO_Port GPIOC
-
+#define IMU_CS_Pin GPIO_PIN_13
+#define IMU_CS_GPIO_Port GPIOD
 #define GPS_RST_Pin GPIO_PIN_6
 #define GPS_RST_GPIO_Port GPIOC
 #define GPS_INT_Pin GPIO_PIN_7
 #define GPS_INT_GPIO_Port GPIOC
+#define LD1_Pin GPIO_PIN_8
+#define LD1_GPIO_Port GPIOA
+#define SD_DETECT_Pin GPIO_PIN_0
+#define SD_DETECT_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */
+/* Only two status LEDs on Meteor; LD3 aliases LD1. */
+#define LD3_Pin LD1_Pin
+#define LD3_GPIO_Port LD1_GPIO_Port
+
+/* SPLIT V3 camera power, MOSFET gate HIGH = on. PC0/PC2 stay unconfigured
+ * until those cameras are fitted; PC1 (CAM2) is configured in CubeMX. */
+#define CAM1_Pin GPIO_PIN_0
+#define CAM1_GPIO_Port GPIOC
+#define CAM3_Pin GPIO_PIN_2
+#define CAM3_GPIO_Port GPIOC
+
 typedef struct {
     float pos[3];
     float vel[3];

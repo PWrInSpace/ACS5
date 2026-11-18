@@ -7,11 +7,14 @@
   */
 /* USER CODE END Header */
 
+/* Includes ------------------------------------------------------------------*/
 #include "FreeRTOS.h"
 #include "task.h"
 #include "main.h"
+#include "FreeRTOS.h"
 #include "cmsis_os2.h"
 
+/* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "aggregator.h"
 #include "usb_print.h"
@@ -20,30 +23,128 @@
 #include "ff.h"
 /* USER CODE END Includes */
 
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-extern SPI_HandleTypeDef hspi2;
-extern void StartSDTask(void *argument);
 
-extern osThreadId_t sdTaskHandle;
-extern osThreadId_t aggregatorTaskHandle;
-extern osThreadId_t gnssTaskHandle;
-
-extern const osThreadAttr_t sdTask_attributes;
-extern const osThreadAttr_t aggregatorTask_attributes;
-extern const osThreadAttr_t gnssTask_attributes;
 /* USER CODE END Variables */
+/* Definitions for aggregatorTask */
+osThreadId_t aggregatorTaskHandle;
+const osThreadAttr_t aggregatorTask_attributes = {
+  .name = "aggregatorTask",
+  .stack_size = 2048 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for sdTask */
+osThreadId_t sdTaskHandle;
+const osThreadAttr_t sdTask_attributes = {
+  .name = "sdTask",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for gnssTask */
+osThreadId_t gnssTaskHandle;
+const osThreadAttr_t gnssTask_attributes = {
+  .name = "gnssTask",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
 
-void MX_FREERTOS_Init(void)
-{
-    /* USER CODE BEGIN Init */
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN FunctionPrototypes */
+
+/* USER CODE END FunctionPrototypes */
+
+extern void StartAggregator(void *argument);
+extern void StartSDTask(void *argument);
+extern void gnss_task(void *argument);
+
+extern void MX_USB_DEVICE_Init(void);
+void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
+/**
+  * @brief  FreeRTOS initialization
+  * @param  None
+  * @retval None
+  */
+void MX_FREERTOS_Init(void) {
+  /* USER CODE BEGIN Init */
     usb_print_init();
-    /* USER CODE END Init */
+  /* USER CODE END Init */
 
-    /* USER CODE BEGIN RTOS_THREADS */
-    aggregatorTaskHandle = osThreadNew(StartAggregator, NULL, &aggregatorTask_attributes);
-    sdTaskHandle         = osThreadNew(StartSDTask,     NULL, &sdTask_attributes);
-    if (!gnss_init(&huart7))
-        Error_Handler();
-    gnssTaskHandle       = osThreadNew(gnss_task,       NULL, &gnssTask_attributes);
-    /* USER CODE END RTOS_THREADS */
+  /* USER CODE BEGIN RTOS_MUTEX */
+  /* add mutexes, ... */
+  /* USER CODE END RTOS_MUTEX */
+
+  /* USER CODE BEGIN RTOS_SEMAPHORES */
+  /* add semaphores, ... */
+  /* USER CODE END RTOS_SEMAPHORES */
+
+  /* USER CODE BEGIN RTOS_TIMERS */
+  /* start timers, add new ones, ... */
+  /* USER CODE END RTOS_TIMERS */
+
+  /* USER CODE BEGIN RTOS_QUEUES */
+  /* add queues, ... */
+  /* USER CODE END RTOS_QUEUES */
+
+  /* Create the thread(s) */
+  /* creation of aggregatorTask */
+  aggregatorTaskHandle = osThreadNew(StartAggregator, NULL, &aggregatorTask_attributes);
+
+  /* creation of sdTask */
+  sdTaskHandle = osThreadNew(StartSDTask, NULL, &sdTask_attributes);
+
+  /* creation of gnssTask */
+  gnssTaskHandle = osThreadNew(gnss_task, NULL, &gnssTask_attributes);
+
+  /* USER CODE BEGIN RTOS_THREADS */
+  if (!gnss_init(&huart7))
+    Error_Handler();
+  /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
+
 }
+
+/* USER CODE BEGIN Header_StartAggregator */
+/**
+  * @brief  Function implementing the aggregatorTask thread.
+  * @param  argument: Not used
+  * @retval None
+  */
+/* USER CODE END Header_StartAggregator */
+__weak void StartAggregator(void *argument)
+{
+  /* init code for USB_DEVICE */
+  MX_USB_DEVICE_Init();
+  /* USER CODE BEGIN StartAggregator */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END StartAggregator */
+}
+
+/* Private application code --------------------------------------------------*/
+/* USER CODE BEGIN Application */
+
+/* USER CODE END Application */
+

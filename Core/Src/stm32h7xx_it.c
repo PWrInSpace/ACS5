@@ -57,9 +57,9 @@
 /* External variables --------------------------------------------------------*/
 extern PCD_HandleTypeDef hpcd_USB_OTG_HS;
 extern SD_HandleTypeDef hsd1;
-extern TIM_HandleTypeDef htim6;
 extern DMA_HandleTypeDef hdma_uart7_rx;
 extern UART_HandleTypeDef huart7;
+extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
 
@@ -164,6 +164,20 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles DMA1 stream0 global interrupt.
+  */
+void DMA1_Stream0_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_uart7_rx);
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 1 */
+}
+
+/**
   * @brief This function handles SDMMC1 global interrupt.
   */
 void SDMMC1_IRQHandler(void)
@@ -206,19 +220,17 @@ void OTG_HS_IRQHandler(void)
 }
 
 /**
-  * @brief DMA1 Stream0 — UART7 RX (GNSS)
-  */
-void DMA1_Stream0_IRQHandler(void)
-{
-  HAL_DMA_IRQHandler(&hdma_uart7_rx);
-}
-
-/**
-  * @brief UART7 global interrupt (idle-line / errors for GNSS DMA RX)
+  * @brief This function handles UART7 global interrupt.
   */
 void UART7_IRQHandler(void)
 {
+  /* USER CODE BEGIN UART7_IRQn 0 */
+
+  /* USER CODE END UART7_IRQn 0 */
   HAL_UART_IRQHandler(&huart7);
+  /* USER CODE BEGIN UART7_IRQn 1 */
+
+  /* USER CODE END UART7_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
