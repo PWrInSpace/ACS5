@@ -61,6 +61,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/sensor_drivers/mag/mmc5983ma.c
     Core/Src/sensor_drivers/servos/servo_t75.c
     Core/Src/sensor_drivers/servos/servo_t75_math.c
+    Core/Src/sensor_drivers/servos/servo_bench.c
+    Core/Src/sensor_drivers/servos/canard_lock.c
     Core/Src/sensor_drivers/gnss/max_m10s.c
     Core/Src/sensor_drivers/gnss/ubx_parse.c
     Core/Src/tasks/gnss_task.c
@@ -80,6 +82,12 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
 )
+
+option(ACS5_SERVO_BENCH "Bench build: cycles fins and lock, never runs the flight loop" OFF)
+if(ACS5_SERVO_BENCH)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE ACS5_SERVO_BENCH=1)
+    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ACS5_bench)
+endif()
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}

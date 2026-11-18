@@ -139,12 +139,11 @@ int main(void)
   MX_DMA_Init();
   MX_SPI2_Init();
   MX_UART7_Init();   /* GNSS (MAX-M10S) — PE8 TX / PE7 RX */
-  /* MX_TIM4_Init / MX_TIM1_Init kept for Cube parity; servo GPIOs disabled */
-  MX_TIM4_Init();
+  MX_TIM3_Init();    /* canard servos, J4 CH2..CH5 */
   MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
   HAL_Delay(1000);
-  MX_TIM1_Init();
+  MX_TIM2_Init();    /* canard lock, J4 CH6 */
   MX_TIM15_Init();   /* buzzer on PE5 */
   /* USER CODE BEGIN 2 */
   HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
@@ -156,14 +155,6 @@ int main(void)
 
   HAL_Delay(1000);
 
-#if 0
-  /* ACS5: servo / lock PWM outputs disabled (Meteor pinout). */
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_3);
-  HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_4);
-  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-#endif
   /* USER CODE END 2 */
 
   /* Init scheduler */
