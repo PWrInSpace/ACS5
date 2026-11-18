@@ -2,6 +2,14 @@
 
 Cel: potwierdzić mapowanie gniazd J4 na płetwy, kierunki wychyleń i działanie blokady. Wyniki są wejściem do miksera regulatora 3-osiowego.
 
+## Pierwsze uruchomienie płytki
+
+Zegar systemowy pochodzi z kwarcu HSE 50 MHz (Y1). Jeśli kwarc nie wystartuje, firmware zatrzymuje się w `Error_Handler` zaraz po włączeniu: brak enumeracji USB, brak komunikatów, LED-y nie migają. Wtedy sprawdzić montaż Y1 oraz C34/C35 (6 pF).
+
+1. Flash buildu lotnego, USB do komputera.
+2. Port CDC pojawia się w systemie, a w terminalu `--- ACS5 Aggregator Task Starting ---`.
+3. Telemetria raportuje pętlę ~500 Hz (`[STANDBY] 500 Hz`).
+
 ## Przygotowanie
 
 1. Serwa SRT T75 w gniazdach J4 CH2–CH5, serwo blokady w CH6. CH1 nie jest podłączone do MCU.
