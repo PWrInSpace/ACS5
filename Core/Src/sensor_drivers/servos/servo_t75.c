@@ -1,18 +1,18 @@
 #include "servos/servo_t75.h"
-#include "tim.h"    /* CubeMX-generated, declares htim4 */
+#include "tim.h"    /* CubeMX-generated, declares htim3 */
 
-/* -- Fin -> TIM channel mapping ----------------------------------------------
- * Matches PCB silkscreen CH1..CH4_PWM on PD12..PD15:
- *   fin 0 -> PD15 -> TIM4_CH4
- *   fin 1 -> PD14 -> TIM4_CH3
- *   fin 2 -> PD13 -> TIM4_CH2
- *   fin 3 -> PD12 -> TIM4_CH1
+/* -- Fin -> TIM channel mapping (ORC Meteor servo header J4) ----------------
+ * J4 CH1 has no MCU pin on this board revision; CH6 carries the canard lock.
+ *   fin 0 -> J4 CH2 -> PB1 -> TIM3_CH4
+ *   fin 1 -> J4 CH3 -> PB0 -> TIM3_CH3
+ *   fin 2 -> J4 CH4 -> PA7 -> TIM3_CH2
+ *   fin 3 -> J4 CH5 -> PA6 -> TIM3_CH1
  * --------------------------------------------------------------------------- */
 static const uint32_t kFinToHalChannel[SERVO_T75_FIN_COUNT] = {
-    TIM_CHANNEL_4,   /* fin 0 - PD15 */
-    TIM_CHANNEL_3,   /* fin 1 - PD14 */
-    TIM_CHANNEL_2,   /* fin 2 - PD13 */
-    TIM_CHANNEL_1,   /* fin 3 - PD12 */
+    TIM_CHANNEL_4,   /* fin 0 - PB1 */
+    TIM_CHANNEL_3,   /* fin 1 - PB0 */
+    TIM_CHANNEL_2,   /* fin 2 - PA7 */
+    TIM_CHANNEL_1,   /* fin 3 - PA6 */
 };
 
 static void set_pwm_pulse(TIM_HandleTypeDef *htim, uint32_t channel, uint16_t pulse_us)
@@ -69,7 +69,7 @@ bool servo_bank_t75_init(servo_bank_t75_t *self, TIM_HandleTypeDef *htim,
         self->current_us[i] = self->cfg.neutral_us[i];
     }
 
-    /* TIM4 must already be started by CubeMX MX_TIM4_Init().
+    /* TIM3 must already be configured by CubeMX MX_TIM3_Init().
      * We just start the PWM channels here - pins stay at 0 until arm(). */
     for (uint8_t i = 0; i < SERVO_T75_FIN_COUNT; ++i)
     {

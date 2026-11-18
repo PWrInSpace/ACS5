@@ -5,10 +5,9 @@
 #include "control/flight_sm.h"
 #include "control/arming.h"
 #include "control/roll_ctrl.h"
-/* ACS5: servo bank kept in tree but not driven (Meteor pinout / no canards). */
-#if 0
 #include "servos/servo_t75.h"
-#endif
+#include "servos/canard_lock.h"
+#include "servos/servo_bench.h"
 #include "flight/flight_data.h"
 #include "tasks/gnss_task.h"
 #include "utils/mathx.h"
@@ -31,10 +30,8 @@ static mmc5983ma_t  g_mag;
 static attitude_t g_est;
 
 extern void MX_USB_DEVICE_Init(void);
-#if 0
-extern TIM_HandleTypeDef htim4;
-extern TIM_HandleTypeDef htim1;
-#endif
+extern TIM_HandleTypeDef htim3;
+extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim15;
 extern osThreadId_t sdTaskHandle;
 
@@ -119,13 +116,46 @@ static const uint16_t BARKA_CHORUS_LEN =
     (uint16_t)(sizeof(BARKA_CHORUS) / sizeof(BARKA_CHORUS[0]));
 
 
-#if 0
-static void set_lock_servo(uint16_t pulse_us)
+#ifdef ACS5_SERVO_BENCH
+static void run_servo_bench(servo_bank_t75_t *servos)
 {
-    __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_1, pulse_us);
+    USB_PRINTF("[BENCH] Servo bench build - flight loop disabled\r\n");
+
+    const uint32_t   t0          = osKernelGetTickCount();
+    uint32_t         wake        = t0;
+    servo_bench_cmd_t prev       = { .active_fin = -2 };
+    float            prev_deg    = 0.0f;
+
+    for (;;)
+    {
+        servo_bench_cmd_t cmd = servo_bench_cmd_at(osKernelGetTickCount() - t0);
+
+        for (uint8_t i = 0; i < SERVO_T75_FIN_COUNT; i++)
+            servo_bank_t75_set_angle_deg(servos, i, cmd.fin_deg[i]);
+        servo_bank_t75_tick(servos, CONTROL_TICK_MS);
+        canard_lock_set_us(cmd.lock_us);
+
+        float active_deg = (cmd.active_fin >= 0) ? cmd.fin_deg[cmd.active_fin] : 0.0f;
+        if (cmd.active_fin != prev.active_fin || cmd.lock_us != prev.lock_us ||
+            active_deg != prev_deg)
+        {
+            if (cmd.active_fin >= 0)
+                USB_PRINTF("[BENCH] %s %+.0f deg | target=%u us\r\n",
+                           servo_bench_socket_name((uint8_t)cmd.active_fin), active_deg,
+                           (unsigned)servos->target_us[cmd.active_fin]);
+            else
+                USB_PRINTF("[BENCH] LOCK %s pulse=%u us\r\n",
+                           cmd.lock_us == CANARD_LOCK_US_LOCKED ? "CLOSED" : "OPEN",
+                           (unsigned)cmd.lock_us);
+            prev     = cmd;
+            prev_deg = active_deg;
+        }
+
+        wake += CONTROL_TICK_MS;
+        osDelayUntil(wake);
+    }
 }
 #endif
-
 
 static void print_attitude_deg(const float euler_rad[3])
 {
@@ -207,22 +237,30 @@ void StartAggregator(void *argument)
     else
         USB_PRINTF("[OK] Mag Initialized\r\n");
 
-    /* -- Servos (disabled on ACS5 / Meteor) -------------------------------- */
-#if 0
+    /* -- Servos + canard lock ------------------------------------------- */
     static servo_bank_t75_t g_servos;
     servo_t75_config_t servo_cfg = servo_t75_config_rocket_default();
-    if (!servo_bank_t75_init(&g_servos, &htim4, &servo_cfg))
-        USB_PRINTF("[ERROR] Servo bank init FAILED\r\n");
+    if (!servo_bank_t75_init(&g_servos, &htim3, &servo_cfg) ||
+        !canard_lock_init(&htim2))
+    {
+        for (;;)
+        {
+            USB_PRINTF("[FATAL] Servo / lock PWM init failed\r\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
 
-    set_lock_servo(1050);
+    canard_lock_set_us(CANARD_LOCK_US_UNLOCKED);
     osDelay(3000);
-    set_lock_servo(1900);
+    canard_lock_set_us(CANARD_LOCK_US_LOCKED);
     vTaskDelay(pdMS_TO_TICKS(50));
 
     servo_bank_t75_arm(&g_servos);
-    USB_PRINTF("[OK] Servos armed (neutral)\r\n");
-#else
-    USB_PRINTF("[OK] Servos DISABLED (ACS5)\r\n");
+    USB_PRINTF("[OK] Servos armed (neutral), canards locked\r\n");
+
+#ifdef ACS5_SERVO_BENCH
+    /* Separate build so the bench sequence cannot exist in flight firmware. */
+    run_servo_bench(&g_servos);
 #endif
 
     camera_set_enabled(false);
@@ -413,13 +451,6 @@ void StartAggregator(void *argument)
                 USB_PRINTF("[CAM] SPLIT V3 MOSFET HIGH\r\n");
             }
 
-#if 0
-            if (g_sm.state == FLIGHT_STATE_FREE_FLIGHT)
-            {
-                set_lock_servo(1050);
-                USB_PRINTF("[LOCK] Canards UNLOCKED\r\n");
-            }
-#endif
             if (g_sm.state == FLIGHT_STATE_FALLING)
                 USB_PRINTF("[LOG] cutoff in %lu ticks\r\n",
                            (unsigned long)sm_cfg.post_falling_timeout_ticks);
@@ -476,14 +507,12 @@ void StartAggregator(void *argument)
             USB_PRINTF("[CTRL] phase %d -> %d | theta=%.1f deg\r\n",
                        (int)prev_phase, (int)g_rc.phase, g_rc.theta_meas * RAD2DEG);
 
-        /* -- 6. Servos (disabled) ---------------------------------------- */
-#if 0
+        /* -- 6. Servos ---------------------------------------------------- */
+        /* Held neutral and locked until the 3-axis controller replaces roll_ctrl;
+         * delta_rad is still computed and logged. */
         for (uint8_t i = 0; i < SERVO_T75_FIN_COUNT; i++)
-            servo_bank_t75_set_angle_deg(&g_servos, i, delta_rad * RAD2DEG);
+            servo_bank_t75_set_angle_deg(&g_servos, i, 0.0f);
         servo_bank_t75_tick(&g_servos, TICK_MS);
-#else
-        (void)delta_rad;
-#endif
 
         /* -- 7. SD Logging ------------------------------------------------ */
         bool do_log = false;
@@ -521,11 +550,7 @@ void StartAggregator(void *argument)
             g_log.ctrl_rate_sp    = g_rc.rate_sp;
             g_log.ctrl_theta_meas = g_rc.theta_meas;
             g_log.ctrl_canard_cmd = delta_rad;
-#if 0
             g_log.ctrl_canard_us  = servo_bank_t75_current_pulse_us(&g_servos, 0);
-#else
-            g_log.ctrl_canard_us  = 0;
-#endif
             g_log.timestamp_ms = osKernelGetTickCount();
 
             /* GNSS snapshot for the CSV row (non-blocking; skip if contended). */

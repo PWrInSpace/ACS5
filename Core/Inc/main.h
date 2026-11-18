@@ -28,11 +28,11 @@ void Error_Handler(void);
 #define SD_DETECT_Pin GPIO_PIN_0
 #define SD_DETECT_GPIO_Port GPIOD
 
-#define LD1_Pin GPIO_PIN_7          /* LED_1 */
+#define LD1_Pin GPIO_PIN_8          /* LED_1 */
 #define LD1_GPIO_Port GPIOA
-#define LD2_Pin GPIO_PIN_3          /* LED_2 */
+#define LD2_Pin GPIO_PIN_4          /* LED_2 */
 #define LD2_GPIO_Port GPIOA
-#define LD3_Pin GPIO_PIN_7          /* only two status LEDs on Meteor; alias LD1 */
+#define LD3_Pin GPIO_PIN_8          /* only two status LEDs on Meteor; alias LD1 */
 #define LD3_GPIO_Port GPIOA
 
 #define MAG_CS_Pin GPIO_PIN_8

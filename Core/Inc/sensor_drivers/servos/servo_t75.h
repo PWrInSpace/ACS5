@@ -37,7 +37,7 @@ typedef struct
     uint16_t           current_us[SERVO_T75_FIN_COUNT];
 } servo_bank_t75_t;
 
-/* htim is your CubeMX-generated &htim4 */
+/* htim is the CubeMX-generated &htim3 */
 WARN_UNUSED bool servo_bank_t75_init(servo_bank_t75_t *self, TIM_HandleTypeDef *htim,
                                      const servo_t75_config_t *cfg);
 
