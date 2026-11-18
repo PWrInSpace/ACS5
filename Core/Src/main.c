@@ -109,7 +109,18 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-
+  /* HSI48 (USB clock) trimmed to the host SOF. Set here, not in CubeMX: CubeMX 6.17
+   * emits SYNC_SOURCE_USB2, but the H725's only USB is OTG_HS = USB1. */
+  RCC_CRSInitTypeDef crs = {
+    .Prescaler             = RCC_CRS_SYNC_DIV1,
+    .Source                = RCC_CRS_SYNC_SOURCE_USB1,
+    .Polarity              = RCC_CRS_SYNC_POLARITY_RISING,
+    .ReloadValue           = RCC_CRS_RELOADVALUE_DEFAULT,
+    .ErrorLimitValue       = RCC_CRS_ERRORLIMIT_DEFAULT,
+    .HSI48CalibrationValue = RCC_CRS_HSI48CALIBRATION_DEFAULT,
+  };
+  __HAL_RCC_CRS_CLK_ENABLE();
+  HAL_RCCEx_CRSConfig(&crs);
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -177,20 +188,19 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_DIV1;
-  RCC_OscInitStruct.HSICalibrationValue = 64;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 4;
-  RCC_OscInitStruct.PLL.PLLN = 18;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 5;
+  RCC_OscInitStruct.PLL.PLLN = 30;
   RCC_OscInitStruct.PLL.PLLP = 1;
   RCC_OscInitStruct.PLL.PLLQ = 2;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
-  RCC_OscInitStruct.PLL.PLLFRACN = 6144;
+  RCC_OscInitStruct.PLL.PLLFRACN = 0;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
