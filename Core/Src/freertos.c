@@ -15,13 +15,14 @@
 /* USER CODE BEGIN Includes */
 #include "aggregator.h"
 #include "usb_print.h"
+#include "usart.h"
+#include "tasks/gnss_task.h"
 #include "ff.h"
 /* USER CODE END Includes */
 
 /* USER CODE BEGIN Variables */
 extern SPI_HandleTypeDef hspi2;
 extern void StartSDTask(void *argument);
-extern void gnss_task(void *arg);
 
 extern osThreadId_t sdTaskHandle;
 extern osThreadId_t aggregatorTaskHandle;
@@ -41,6 +42,8 @@ void MX_FREERTOS_Init(void)
     /* USER CODE BEGIN RTOS_THREADS */
     aggregatorTaskHandle = osThreadNew(StartAggregator, NULL, &aggregatorTask_attributes);
     sdTaskHandle         = osThreadNew(StartSDTask,     NULL, &sdTask_attributes);
+    if (!gnss_init(&huart7))
+        Error_Handler();
     gnssTaskHandle       = osThreadNew(gnss_task,       NULL, &gnssTask_attributes);
     /* USER CODE END RTOS_THREADS */
 }

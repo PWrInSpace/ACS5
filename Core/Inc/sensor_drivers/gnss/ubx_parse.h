@@ -1,10 +1,13 @@
 /*
  * ACS5 - u-blox UBX protocol, platform-independent layer.
  *
- * Frame state machine, Fletcher-8 checksum, UBX-NAV-PVT decode, frame
- * construction for the configuration messages, and the geodetic-to-local-NED
- * conversion.
+ * Frame state machine, Fletcher-8 checksum, UBX-NAV-PVT decode and frame
+ * construction for the configuration messages.
  *
+ * Pointer arguments must not be NULL. Callers pass static or stack objects, so
+ * this is checked with assert() rather than at run time; data-dependent
+ * problems (short payload, buffer too small, invalid datum) are reported through
+ * the return value instead.
  */
 #pragma once
 
@@ -28,8 +31,17 @@
 #define UBX_NAV_PVT_LEN 92u
 #define UBX_ACK_LEN      2u
 
-/* Framing overhead: 2 sync + class + id + 2 length + 2 checksum. */
-#define UBX_FRAME_OVERHEAD 8u
+/* Frame layout: sync1 sync2 class id len_lo len_hi | payload | ck_a ck_b */
+#define UBX_OFS_SYNC1    0u
+#define UBX_OFS_SYNC2    1u
+#define UBX_OFS_CLASS    2u
+#define UBX_OFS_ID       3u
+#define UBX_OFS_LEN      4u   /* 16-bit little-endian payload length */
+#define UBX_OFS_PAYLOAD  6u   /* the checksum follows the payload */
+#define UBX_CHECKSUM_LEN 2u
+
+/* Framing overhead: everything but the payload. */
+#define UBX_FRAME_OVERHEAD (UBX_OFS_PAYLOAD + UBX_CHECKSUM_LEN)
 
 #define UBX_MAX_PAYLOAD UBX_NAV_PVT_LEN
 
@@ -46,9 +58,18 @@ typedef enum
     UBX_ST_CK_B,
 } ubx_state_t;
 
+/* Parser health counters; all only ever increase. */
 typedef struct
 {
-    uint8_t  state;          /* ubx_state_t */
+    uint32_t frames_ok;
+    uint32_t checksum_errors;
+    uint32_t resyncs;        /* hunts restarted after a malformed frame */
+    uint32_t oversized;
+} ubx_stats_t;
+
+typedef struct
+{
+    ubx_state_t state;       /* frame-parsing state machine position */
     uint8_t  msg_class;
     uint8_t  msg_id;
     uint16_t len;            /* declared payload length of the frame in progress */
@@ -56,22 +77,19 @@ typedef struct
     uint8_t  ck_a, ck_b;
     uint8_t  payload[UBX_MAX_PAYLOAD];
 
-    /* Health counters: */
-    uint32_t frames_ok;
-    uint32_t checksum_errors;
-    uint32_t resyncs;        /* hunts restarted after a malformed frame */
-    uint32_t oversized;
+    ubx_stats_t stats;
 } ubx_parser_t;
 
 void ubx_parser_init(ubx_parser_t *p);
+
+/* Abandons the frame in progress and resumes hunting for a sync pair. Unlike
+ * ubx_parser_init() it keeps the health counters (and counts a resync). */
+void ubx_parser_resync(ubx_parser_t *p);
 
 /* Feeds one received byte. Returns true exactly when a complete frame with a
  * valid checksum is available.
  */
 bool ubx_parse_byte(ubx_parser_t *p, uint8_t b);
-
-/* Fletcher-8 over buf[0..len) */
-void ubx_checksum(const uint8_t *buf, uint16_t len, uint8_t *ck_a, uint8_t *ck_b);
 
 /* Writes a complete frame into out (sync through checksum) and returns its
  * total length, or 0 if out_cap cannot hold it. */
@@ -98,14 +116,18 @@ typedef struct
     uint32_t itow_ms;          /* GPS time of week, ms */
 
     uint16_t year;
-    uint8_t  month, day, hour, min, sec;
+    uint8_t  month;
+    uint8_t  day;
+    uint8_t  hour;
+    uint8_t  min;
+    uint8_t  sec;
     bool     valid_date;
     bool     valid_time;
     bool     fully_resolved;   /* UTC offset known; time is unambiguous */
     uint32_t t_acc_ns;
     int32_t  nano;             /* fraction of second */
 
-    uint8_t  fix_type;       
+    ubx_fix_type_t fix_type;
     bool     fix_ok;
     uint8_t  num_sv;           /* satellites used in the solution */
 
@@ -128,31 +150,12 @@ typedef struct
 
 bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out);
 
-/* Decodes an ACK-ACK / ACK-NAK payload into the class and id being answered.
- * *acknowledged is false for a NAK. */
-bool ubx_decode_ack(uint8_t msg_id, const uint8_t *payload, uint16_t len,
-                    uint8_t *acked_class, uint8_t *acked_id, bool *acknowledged);
+/* True if the solution carries a usable position: the receiver flags it valid
+ * (fix_ok) and it is a 3D fix or GNSS + dead reckoning. 2D, dead reckoning alone
+ * and time-only fixes do not qualify (time-only has no position at all). */
+bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt);
 
-                 
-/* ------------------------------------------------------------- local NED */
-
-typedef struct
-{
-    int32_t lat_1e7;
-    int32_t lon_1e7;
-    int32_t height_mm;
-    float   m_per_deg_lat;   /* meridian radius at lat_1e7*/
-    float   m_per_deg_lon;   /* prime-vertical radius times cos(lat)*/
-    bool    valid;
-} ubx_datum_t;
-
-void ubx_datum_clear(ubx_datum_t *d);
-
-
-void ubx_datum_set(ubx_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,
-                   int32_t height_mm);
-
-
-void ubx_geodetic_to_ned(const ubx_datum_t *d,
-                         int32_t lat_1e7, int32_t lon_1e7, int32_t height_mm,
-                         float out_ned_m[3]);
+/* True if the frame just completed in *p is an ACK-ACK or ACK-NAK answering the
+ * message (cls, id). On true, *acked is true for an ACK and false for a NAK.
+ * Call right after ubx_parse_byte() returns true. */
+bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked);

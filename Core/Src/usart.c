@@ -8,6 +8,8 @@
 /* USER CODE END Header */
 #include "usart.h"
 
+#include "tasks/gnss_task.h"
+
 UART_HandleTypeDef huart7;
 DMA_HandleTypeDef  hdma_uart7_rx;
 
@@ -97,4 +99,22 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
     HAL_DMA_DeInit(uartHandle->hdmarx);
     HAL_NVIC_DisableIRQ(UART7_IRQn);
   }
+}
+
+/* ---------------------------------------------------------------- UART callbacks
+ *
+ * The HAL declares these as weak functions and allows exactly one definition in
+ * the whole program, so every UART user's events are dispatched from here. A new
+ * module that receives on another UART adds its own hook to the matching
+ * function below. */
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
+{
+  (void)size;
+  gnss_task_on_uart_rx_event(huart);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  gnss_task_on_uart_error(huart);
 }

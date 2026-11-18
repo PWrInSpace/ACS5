@@ -4,145 +4,236 @@
  */
 
 
+#include <assert.h>
+
 #include "stm32h7xx_hal.h"
 
 #include "cmsis_os2.h"
 
-#include "flight/flight_data.h"
-#include "gnss/max_m10s.h"
-
-#include <string.h>
+#include "tasks/gnss_task.h"
+#include "sensor_drivers/gnss/max_m10s.h"
+#include "utils/geo_ned.h"
 
 /*------------------------------------------------------------------- globals */
 
-gnss_fix_t      g_gnss_fix;        //zero-initialised at startup 
-osMutexId_t     g_gnss_mutex;
-osSemaphoreId_t g_gnss_idle_sem;  //binary semaphore, given from UART idle ISR 
+static gnss_fix_t      s_fix;            // zero-initialised at startup
+static osMutexId_t     s_fix_mutex;      // guards s_fix; NULL until gnss_init() has run
+static osSemaphoreId_t s_gnss_idle_sem;  // binary semaphore, given from UART idle ISR
 
-static gnss_driver_t s_drv;
+static max_m10s_driver_t s_drv;
 
-/*--------------------------------------------------------------- idle callback */
+/* The UART the module is on, given to gnss_init(). Written once, after the
+ * semaphore exists, and then only compared by the callbacks below. */
+static UART_HandleTypeDef *volatile s_huart;
 
-// The STM32 HAL calls this from the UART idle IRQ.  
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
+#define GNSS_TASK_WAKE_TIMEOUT_MS    1000u
+#define GNSS_CONFIG_RETRY_DELAY_MS   2000u   /* pause between configuration attempts */
+
+/* NED datum and its capture request. Owned by this task; the request flag is
+ * set from another task by gnss_capture_datum(). Zero-initialised, so the datum
+ * starts out invalid. */
+static geo_ned_datum_t   s_datum;
+static volatile bool s_capture_pending;
+
+/*-------------------------------------------------------------- UART events
+ *
+ * The HAL's UART callbacks are global (one definition per program), so they live
+ * in one central place, usart.c, which forwards each event to whichever module
+ * owns that UART. These two are the GNSS module's part; both run in interrupt
+ * context and ignore any UART that is not the GNSS one. */
+
+// A receive-to-idle event: new bytes are waiting in the DMA buffer.
+void gnss_task_on_uart_rx_event(UART_HandleTypeDef *huart)
 {
-    (void)size;
-    if (huart == &GNSS_HUART_HANDLE)
-        osSemaphoreRelease(g_gnss_idle_sem);
+    if (huart == s_huart)
+        osSemaphoreRelease(s_gnss_idle_sem);
+}
+
+// A UART receive error (overrun, noise, framing...). The HAL has already aborted
+// the DMA, so no idle event will ever come again unless the driver restarts
+// reception: flag it and wake the task to do so.
+void gnss_task_on_uart_error(UART_HandleTypeDef *huart)
+{
+    if (huart == s_huart)
+    {
+        max_m10s_on_uart_error(&s_drv);
+        osSemaphoreRelease(s_gnss_idle_sem);
+    }
 }
 
 /* -------------------------------------------------------------- capture datum
  *
  * Called by the flight state machine when the rocket is on the 
- * pad with a confirmed 3D fix. The driver applies 
- * the datum on the next valid frame. */
+ * pad with a confirmed 3D fix. The task latches
+ * the datum from the next valid fix. */
 void gnss_capture_datum(void)
 {
-    s_drv.capture_pending = true;
+    s_capture_pending = true;
+}
+
+/* -------------------------------------------------------------------- init
+ *
+ * Creates the RTOS objects the other tasks and the UART callbacks depend on.
+ * Called before the kernel starts, so none of them can run before these exist. */
+bool gnss_init(UART_HandleTypeDef *huart)
+{
+    assert(huart != NULL);
+
+    osMutexId_t mutex = osMutexNew(NULL);
+    if (mutex == NULL)
+        return false;
+
+    osSemaphoreId_t sem = osSemaphoreNew(1, 0, NULL);
+    if (sem == NULL)
+    {
+        (void)osMutexDelete(mutex);
+        return false;
+    }
+
+    s_fix_mutex     = mutex;
+    s_gnss_idle_sem = sem;
+    s_huart         = huart;   // last: the callbacks use the semaphore once this is set
+    return true;
+}
+
+/* ----------------------------------------------------------------- get fix
+ *
+ * Non-blocking so a low-rate consumer (the logger) can never be stalled by the
+ * GNSS task holding the mutex. Safe to call before gnss_init(): the mutex does
+ * not exist yet, so it just returns false. */
+bool gnss_get_fix(gnss_fix_t *out)
+{
+    if (out == NULL || s_fix_mutex == NULL)
+        return false;
+    if (osMutexAcquire(s_fix_mutex, 0) != osOK)
+        return false;
+    *out = s_fix;
+    osMutexRelease(s_fix_mutex);
+    return true;
 }
 
 /*-------------------------------------------------------------------- task */
 
-void gnss_task(void *arg)
+// Publishes the link state without touching the rest of the snapshot, so the
+// rest of the system can tell "module not working" from "no fix yet".
+static void publish_link(gnss_link_t link, uint8_t error, uint8_t failures)
 {
-    (void)arg;
+    osMutexAcquire(s_fix_mutex, osWaitForever);
+    s_fix.timestamp_ms    = HAL_GetTick();
+    s_fix.link            = link;
+    s_fix.link_error      = error;
+    s_fix.config_failures = failures;
+    osMutexRelease(s_fix_mutex);
+}
 
-    g_gnss_mutex    = osMutexNew(NULL); 
-    g_gnss_idle_sem = osSemaphoreNew(1, 0, NULL);
-
-    max_m10s_init(&s_drv);
-
-    gnss_status_t cfg = max_m10s_configure(&s_drv);
-    if (cfg != GNSS_OK)
-    {
-        for (;;)
-            osDelay(1000);
-    }
+// Brings the module up, retrying for as long as it takes (it may be powered
+// late, or the link may glitch) and saying so to everyone who reads the fix.
+// Only configure() is repeated once the driver is initialised: it restarts the
+// receive itself, so it is safe to call again. Returns the number of failed
+// attempts (saturating).
+static uint8_t bring_up_module(void)
+{
+    uint8_t failures = 0;
+    bool driver_ready = false;
 
     for (;;)
     {
-        osSemaphoreAcquire(g_gnss_idle_sem, osWaitForever);
-
-        while (max_m10s_drain(&s_drv))
+        max_m10s_status_t st = MAX_M10S_OK;
+        if (!driver_ready)
         {
-            if (s_drv.parser.msg_class == UBX_CLASS_NAV &&
-                s_drv.parser.msg_id   == UBX_ID_NAV_PVT)
-            {
-                ubx_nav_pvt_t pvt;
-                if (!ubx_decode_nav_pvt(s_drv.parser.payload,
-                                        s_drv.parser.len, &pvt))
-                    continue;
+            st = max_m10s_init(&s_drv, s_huart);
+            driver_ready = (st == MAX_M10S_OK);
+        }
+        if (driver_ready)
+            st = max_m10s_configure(&s_drv);
+        if (st == MAX_M10S_OK)
+            break;
 
-                /* Apply datum if pending and fix is valid. */
-                if (s_drv.capture_pending &&
-                    pvt.fix_ok && pvt.fix_type >= UBX_FIX_3D)
-                {
-                    ubx_datum_set(&s_drv.datum,
-                                  pvt.lat_1e7, pvt.lon_1e7, pvt.height_mm);
-                    s_drv.capture_pending = false;
-                }
+        if (failures < UINT8_MAX)
+            failures++;
+        publish_link(GNSS_LINK_FAILED, (uint8_t)st, failures);
+        osDelay(GNSS_CONFIG_RETRY_DELAY_MS);
+    }
 
-                /* Build fix snapshot. */
-                gnss_fix_t snap;
-                memset(&snap, 0, sizeof(snap));
+    publish_link(GNSS_LINK_OK, 0u, failures);
+    return failures;
+}
 
-                snap.timestamp_ms = HAL_GetTick();
-                snap.fix_valid    = pvt.fix_ok && (pvt.fix_type >= UBX_FIX_3D);
+static bool is_nav_pvt(const max_m10s_frame_t *frame)
+{
+    return frame->msg_class == UBX_CLASS_NAV && frame->msg_id == UBX_ID_NAV_PVT;
+}
 
-                snap.itow_ms        = pvt.itow_ms;
-                snap.year           = pvt.year;
-                snap.month          = pvt.month;
-                snap.day            = pvt.day;
-                snap.hour           = pvt.hour;
-                snap.min            = pvt.min;
-                snap.sec            = pvt.sec;
-                snap.valid_date     = pvt.valid_date;
-                snap.valid_time     = pvt.valid_time;
-                snap.fully_resolved = pvt.fully_resolved;
-                snap.t_acc_ns       = pvt.t_acc_ns;
-                snap.nano           = pvt.nano;
+// Latches the NED datum from this fix if one was requested and it has a position.
+static void latch_datum_if_requested(const ubx_nav_pvt_t *pvt)
+{
+    if (s_capture_pending && ubx_nav_pvt_has_position(pvt))
+    {
+        geo_ned_datum_set(&s_datum, pvt->lat_1e7, pvt->lon_1e7, pvt->height_mm);
+        s_capture_pending = false;
+    }
+}
 
-                snap.fix_type = pvt.fix_type;
-                snap.fix_ok   = pvt.fix_ok;
-                snap.num_sv   = pvt.num_sv;
+// Fills *snap from a decoded NAV-PVT (kept whole), the NED datum and the driver's
+// counters.
+static void build_snapshot(const ubx_nav_pvt_t *pvt, uint8_t failures, gnss_fix_t *snap)
+{
+    *snap = (gnss_fix_t){0};
 
-                snap.lon_1e7   = pvt.lon_1e7;
-                snap.lat_1e7   = pvt.lat_1e7;
-                snap.height_mm = pvt.height_mm;
-                snap.h_msl_mm  = pvt.h_msl_mm;
-                snap.h_acc_m   = pvt.h_acc_m;
-                snap.v_acc_m   = pvt.v_acc_m;
+    snap->timestamp_ms    = HAL_GetTick();
+    snap->link            = GNSS_LINK_OK;
+    snap->config_failures = failures;
+    snap->fix_valid       = ubx_nav_pvt_has_position(pvt);
 
-                snap.vel_ned_mps[0]   = pvt.vel_ned_mps[0];
-                snap.vel_ned_mps[1]   = pvt.vel_ned_mps[1];
-                snap.vel_ned_mps[2]   = pvt.vel_ned_mps[2];
-                snap.ground_speed_mps = pvt.ground_speed_mps;
-                snap.s_acc_mps        = pvt.s_acc_mps;
-                snap.head_motion_deg  = pvt.head_motion_deg;
-                snap.head_acc_deg     = pvt.head_acc_deg;
-                snap.p_dop            = pvt.p_dop;
+    snap->pvt = *pvt;
 
-                /* NED from pad datum. */
-                if (s_drv.datum.valid && snap.fix_valid)
-                {
-                    ubx_geodetic_to_ned(&s_drv.datum,
-                                        pvt.lat_1e7, pvt.lon_1e7,
-                                        pvt.height_mm, snap.ned_m);
-                    snap.ned_valid = true;
-                }
+    /* NED from pad datum. */
+    if (s_datum.valid && snap->fix_valid)
+    {
+        geo_ned_from_geodetic(&s_datum, pvt->lat_1e7, pvt->lon_1e7,
+                              pvt->height_mm, snap->ned_m);
+        snap->ned_valid = true;
+    }
 
-                // Health counters from parser. 
-                snap.frames_ok       = s_drv.parser.frames_ok;
-                snap.checksum_errors = s_drv.parser.checksum_errors;
-                snap.resyncs         = s_drv.parser.resyncs;
-                snap.oversized       = s_drv.parser.oversized;
-                snap.uart_overruns   = s_drv.uart_overruns;
+    max_m10s_get_stats(&s_drv, &snap->stats);
+}
 
-                // Publish under mutex. 
-                osMutexAcquire(g_gnss_mutex, osWaitForever);
-                g_gnss_fix = snap;
-                osMutexRelease(g_gnss_mutex);
-            }
+// Makes the snapshot the one gnss_get_fix() returns.
+static void publish(const gnss_fix_t *snap)
+{
+    osMutexAcquire(s_fix_mutex, osWaitForever);
+    s_fix = *snap;
+    osMutexRelease(s_fix_mutex);
+}
+
+void gnss_task(void *arg)
+{
+    (void)arg;
+    assert(s_huart != NULL && "gnss_init() must run before the task starts");
+
+    const uint8_t failures = bring_up_module();
+
+    for (;;)
+    {
+        // Timeout so that a failed receive restart is retried even though no
+        // event arrives while the DMA is stopped.
+        (void)osSemaphoreAcquire(s_gnss_idle_sem, GNSS_TASK_WAKE_TIMEOUT_MS);
+
+        max_m10s_frame_t frame;
+        while (max_m10s_drain(&s_drv, &frame))
+        {
+            if (!is_nav_pvt(&frame))
+                continue;
+
+            ubx_nav_pvt_t pvt;
+            if (!ubx_decode_nav_pvt(frame.payload, frame.len, &pvt))
+                continue;
+
+            latch_datum_if_requested(&pvt);
+
+            gnss_fix_t snap;
+            build_snapshot(&pvt, failures, &snap);
+            publish(&snap);
         }
     }
 }

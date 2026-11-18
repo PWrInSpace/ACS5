@@ -66,6 +66,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/tasks/gnss_task.c
     Core/Src/usb_print.c
     Core/Src/utils/axes_remap.c
+    Core/Src/utils/geo_ned.c
     Core/Src/utils/timestamp.c
     Core/Src/buzzer/buzzer.c
 )
