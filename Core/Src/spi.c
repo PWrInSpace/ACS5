@@ -24,7 +24,7 @@ void MX_SPI2_Init(void)
   /* USER CODE END SPI2_Init 0 */
 
   /* USER CODE BEGIN SPI2_Init 1 */
-
+  /* IOSwap: Meteor SDI/SDO net naming is crossed vs the STM32 MISO/MOSI AF pads. */
   /* USER CODE END SPI2_Init 1 */
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
@@ -47,7 +47,6 @@ void MX_SPI2_Init(void)
   hspi2.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
   hspi2.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
   hspi2.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
-  /* Meteor SDI/SDO net naming is crossed vs STM32 MISO/MOSI AF pads. */
   hspi2.Init.IOSwap = SPI_IO_SWAP_ENABLE;
   if (HAL_SPI_Init(&hspi2) != HAL_OK)
   {
@@ -128,3 +127,4 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* spiHandle)
 /* USER CODE BEGIN 1 */
 
 /* USER CODE END 1 */
+

@@ -6,108 +6,152 @@
   ******************************************************************************
   */
 /* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
 #include "usart.h"
 
+/* USER CODE BEGIN 0 */
 #include "tasks/gnss_task.h"
+/* USER CODE END 0 */
 
 UART_HandleTypeDef huart7;
-DMA_HandleTypeDef  hdma_uart7_rx;
+DMA_HandleTypeDef hdma_uart7_rx;
 
-void MX_DMA_Init(void)
-{
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
-}
-
+/* UART7 init function */
 void MX_UART7_Init(void)
 {
-  huart7.Instance                    = UART7;
-  huart7.Init.BaudRate               = 38400; /* MAX-M10S boot baud; driver bumps to 115200 */
-  huart7.Init.WordLength             = UART_WORDLENGTH_8B;
-  huart7.Init.StopBits               = UART_STOPBITS_1;
-  huart7.Init.Parity                 = UART_PARITY_NONE;
-  huart7.Init.Mode                   = UART_MODE_TX_RX;
-  huart7.Init.HwFlowCtl              = UART_HWCONTROL_NONE;
-  huart7.Init.OverSampling           = UART_OVERSAMPLING_16;
-  huart7.Init.OneBitSampling         = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart7.Init.ClockPrescaler         = UART_PRESCALER_DIV1;
+
+  /* USER CODE BEGIN UART7_Init 0 */
+
+  /* USER CODE END UART7_Init 0 */
+
+  /* USER CODE BEGIN UART7_Init 1 */
+  /* 38400 is the MAX-M10S boot baud; the driver switches it to 115200. */
+  /* USER CODE END UART7_Init 1 */
+  huart7.Instance = UART7;
+  huart7.Init.BaudRate = 38400;
+  huart7.Init.WordLength = UART_WORDLENGTH_8B;
+  huart7.Init.StopBits = UART_STOPBITS_1;
+  huart7.Init.Parity = UART_PARITY_NONE;
+  huart7.Init.Mode = UART_MODE_TX_RX;
+  huart7.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart7.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart7.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart7.Init.ClockPrescaler = UART_PRESCALER_DIV1;
   huart7.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
   if (HAL_UART_Init(&huart7) != HAL_OK)
+  {
     Error_Handler();
+  }
   if (HAL_UARTEx_SetTxFifoThreshold(&huart7, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
     Error_Handler();
+  }
   if (HAL_UARTEx_SetRxFifoThreshold(&huart7, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
     Error_Handler();
+  }
   if (HAL_UARTEx_DisableFifoMode(&huart7) != HAL_OK)
+  {
     Error_Handler();
+  }
+  /* USER CODE BEGIN UART7_Init 2 */
+
+  /* USER CODE END UART7_Init 2 */
+
 }
 
-void HAL_UART_MspInit(UART_HandleTypeDef *uartHandle)
+void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
 {
+
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
-
-  if (uartHandle->Instance == UART7)
+  if(uartHandle->Instance==UART7)
   {
-    PeriphClkInitStruct.PeriphClockSelection      = RCC_PERIPHCLK_UART7;
+  /* USER CODE BEGIN UART7_MspInit 0 */
+
+  /* USER CODE END UART7_MspInit 0 */
+
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_UART7;
     PeriphClkInitStruct.Usart234578ClockSelection = RCC_USART234578CLKSOURCE_D2PCLK1;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
       Error_Handler();
+    }
 
+    /* UART7 clock enable */
     __HAL_RCC_UART7_CLK_ENABLE();
-    __HAL_RCC_GPIOE_CLK_ENABLE();
 
+    __HAL_RCC_GPIOE_CLK_ENABLE();
     /**UART7 GPIO Configuration
-      PE7     ------> UART7_RX
-      PE8     ------> UART7_TX
+    PE7     ------> UART7_RX
+    PE8     ------> UART7_TX
     */
-    GPIO_InitStruct.Pin       = GPIO_PIN_7 | GPIO_PIN_8;
-    GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull      = GPIO_PULLUP;
-    GPIO_InitStruct.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_PULLUP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_UART7;
     HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-    hdma_uart7_rx.Instance                 = DMA1_Stream0;
-    hdma_uart7_rx.Init.Request             = DMA_REQUEST_UART7_RX;
-    hdma_uart7_rx.Init.Direction           = DMA_PERIPH_TO_MEMORY;
-    hdma_uart7_rx.Init.PeriphInc           = DMA_PINC_DISABLE;
-    hdma_uart7_rx.Init.MemInc              = DMA_MINC_ENABLE;
+    /* UART7 DMA Init */
+    /* UART7_RX Init */
+    hdma_uart7_rx.Instance = DMA1_Stream0;
+    hdma_uart7_rx.Init.Request = DMA_REQUEST_UART7_RX;
+    hdma_uart7_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_uart7_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_uart7_rx.Init.MemInc = DMA_MINC_ENABLE;
     hdma_uart7_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-    hdma_uart7_rx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
-    hdma_uart7_rx.Init.Mode                = DMA_CIRCULAR;
-    hdma_uart7_rx.Init.Priority            = DMA_PRIORITY_HIGH;
-    hdma_uart7_rx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    hdma_uart7_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_uart7_rx.Init.Mode = DMA_CIRCULAR;
+    hdma_uart7_rx.Init.Priority = DMA_PRIORITY_HIGH;
+    hdma_uart7_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
     if (HAL_DMA_Init(&hdma_uart7_rx) != HAL_OK)
+    {
       Error_Handler();
+    }
 
-    __HAL_LINKDMA(uartHandle, hdmarx, hdma_uart7_rx);
+    __HAL_LINKDMA(uartHandle,hdmarx,hdma_uart7_rx);
 
+    /* UART7 interrupt Init */
     HAL_NVIC_SetPriority(UART7_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(UART7_IRQn);
+  /* USER CODE BEGIN UART7_MspInit 1 */
+
+  /* USER CODE END UART7_MspInit 1 */
   }
 }
 
-void HAL_UART_MspDeInit(UART_HandleTypeDef *uartHandle)
+void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
 {
-  if (uartHandle->Instance == UART7)
+
+  if(uartHandle->Instance==UART7)
   {
+  /* USER CODE BEGIN UART7_MspDeInit 0 */
+
+  /* USER CODE END UART7_MspDeInit 0 */
+    /* Peripheral clock disable */
     __HAL_RCC_UART7_CLK_DISABLE();
-    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_7 | GPIO_PIN_8);
+
+    /**UART7 GPIO Configuration
+    PE7     ------> UART7_RX
+    PE8     ------> UART7_TX
+    */
+    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_7|GPIO_PIN_8);
+
+    /* UART7 DMA DeInit */
     HAL_DMA_DeInit(uartHandle->hdmarx);
+
+    /* UART7 interrupt Deinit */
     HAL_NVIC_DisableIRQ(UART7_IRQn);
+  /* USER CODE BEGIN UART7_MspDeInit 1 */
+
+  /* USER CODE END UART7_MspDeInit 1 */
   }
 }
 
-/* ---------------------------------------------------------------- UART callbacks
- *
- * The HAL declares these as weak functions and allows exactly one definition in
- * the whole program, so every UART user's events are dispatched from here. A new
- * module that receives on another UART adds its own hook to the matching
- * function below. */
-
+/* USER CODE BEGIN 1 */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t size)
 {
   (void)size;
@@ -118,3 +162,5 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
   gnss_task_on_uart_error(huart);
 }
+/* USER CODE END 1 */
+

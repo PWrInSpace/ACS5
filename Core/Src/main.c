@@ -10,6 +10,7 @@
 #include "main.h"
 #include "FreeRTOS.h"
 #include "cmsis_os2.h"
+#include "dma.h"
 #include "fatfs.h"
 #include "sdmmc.h"
 #include "spi.h"
@@ -17,10 +18,10 @@
 #include "usart.h"
 #include "usb_device.h"
 #include "gpio.h"
-#include "usb_print.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usb_print.h"
 #include <stdio.h>
 #include <string.h>
 #include "usbd_cdc_if.h"
@@ -50,29 +51,6 @@
 /* USER CODE BEGIN PV */
 SharedLog_t g_log = {0};
 
-/* --- SD Task --- */
-osThreadId_t sdTaskHandle;
-const osThreadAttr_t sdTask_attributes = {
-    .name       = "sdTask",
-    .stack_size = 1024 * 4,
-    .priority   = (osPriority_t) osPriorityNormal,  /* lower than aggregator */
-};
-
-/* --- Aggregator Task --- */
-osThreadId_t aggregatorTaskHandle;
-const osThreadAttr_t aggregatorTask_attributes = {
-    .name       = "aggregatorTask",
-    .stack_size = 1024 * 8,
-    .priority   = (osPriority_t) osPriorityAboveNormal,
-};
-
-/* --- GNSS Task --- */
-osThreadId_t gnssTaskHandle;
-const osThreadAttr_t gnssTask_attributes = {
-    .name       = "gnssTask",
-    .stack_size = 1024 * 4,
-    .priority   = (osPriority_t) osPriorityNormal,
-};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -138,14 +116,14 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_SPI2_Init();
-  MX_UART7_Init();   /* GNSS (MAX-M10S) — PE8 TX / PE7 RX */
-  MX_TIM3_Init();    /* canard servos, J4 CH2..CH5 */
+  MX_UART7_Init();
+  MX_TIM3_Init();
   MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
-  HAL_Delay(1000);
-  MX_TIM2_Init();    /* canard lock, J4 CH6 */
-  MX_TIM15_Init();   /* buzzer on PE5 */
+  MX_TIM2_Init();
+  MX_TIM15_Init();
   /* USER CODE BEGIN 2 */
+  HAL_Delay(1000);
   HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
 
@@ -444,9 +422,18 @@ void MPU_Config(void)
   */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
-  if (htim->Instance == TIM6) HAL_IncTick();
-  if (htim->Instance == TIM1) { /* PWM - nothing needed here */ }
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM6)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
 }
+
 /**
   * @brief  This function is executed in case of error occurrence.
   * @retval None
