@@ -19,6 +19,8 @@ attitude_config_t attitude_config_default(void)
         .n_avg           = ATTITUDE_N_AVG,
         .n_calib         = (int)SEC_TO_TICKS(20.0f),
         .require_calib   = true,
+        .gyro_bias_tau_s     = 5.0f,
+        .gyro_bias_gate_rads = 0.035f,   /* 2 deg/s */
     };
 }
 
@@ -101,7 +103,23 @@ void attitude_reset(attitude_t *est)
     est->prev_gyro[0] = est->prev_gyro[1] = est->prev_gyro[2] = 0.0f;
     mahony_reset_integral(&est->mahony);
     est->acc_bias_w[0] = est->acc_bias_w[1] = est->acc_bias_w[2] = 0.0f;
-    /* Preserve quaternion, calib, and mag reference (soft standby reset). */
+    /* Preserve quaternion, calib, gyro bias and mag reference (soft standby reset). */
+}
+
+/* Running mean while few samples exist, then an EMA with gyro_bias_tau_s. */
+static void gyro_bias_update(attitude_t *est, const attitude_input_t *in)
+{
+    if (!in->zupt_active) return;
+    for (int i = 0; i < 3; i++)
+        if (fabsf(in->gyro_rads[i] - est->gyro_bias[i]) > est->cfg.gyro_bias_gate_rads &&
+            est->gyro_bias_n > 0u)
+            return;
+
+    if (est->gyro_bias_n < UINT32_MAX) est->gyro_bias_n++;
+    float alpha = fmaxf(1.0f / (float)est->gyro_bias_n,
+                        est->cfg.dt_s / fmaxf(est->cfg.gyro_bias_tau_s, est->cfg.dt_s));
+    for (int i = 0; i < 3; i++)
+        est->gyro_bias[i] += alpha * (in->gyro_rads[i] - est->gyro_bias[i]);
 }
 
 void attitude_update(attitude_t *est, const attitude_input_t *in)
@@ -130,9 +148,15 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     float raw_ay = isfinite(in->accel_mps2[1]) ? in->accel_mps2[1] : est->last_good_acc_original[1];
     float raw_az = isfinite(in->accel_mps2[2]) ? in->accel_mps2[2] : est->last_good_acc_original[2];
 
-    float gx = isfinite(in->gyro_rads[0]) ? in->gyro_rads[0] : est->prev_gyro[0];
-    float gy = isfinite(in->gyro_rads[1]) ? in->gyro_rads[1] : est->prev_gyro[1];
-    float gz = isfinite(in->gyro_rads[2]) ? in->gyro_rads[2] : est->prev_gyro[2];
+    float gx, gy, gz;
+    if (isfinite(in->gyro_rads[0]) && isfinite(in->gyro_rads[1]) && isfinite(in->gyro_rads[2])) {
+        gyro_bias_update(est, in);
+        gx = in->gyro_rads[0] - est->gyro_bias[0];
+        gy = in->gyro_rads[1] - est->gyro_bias[1];
+        gz = in->gyro_rads[2] - est->gyro_bias[2];
+    } else {
+        gx = est->prev_gyro[0]; gy = est->prev_gyro[1]; gz = est->prev_gyro[2];
+    }
 
     float baro_alt = in->baro_alt_m;
     if (isfinite(baro_alt)) {

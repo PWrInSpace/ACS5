@@ -369,9 +369,75 @@ static void test_coning_does_not_leak_into_roll(void)
     assert(fabsf(twist_est - twist_truth) < 2.0f);
 }
 
+/* Tilt of the body nose axis from world up, degrees. */
+static float nose_tilt_deg(const attitude_t *est)
+{
+    const float nose[3] = {0.0f, 0.0f, 1.0f};
+    float w[3];
+    quat_rotate(est->q, nose, w);
+    return acosf(clampf(w[2], -1.0f, 1.0f)) * RAD2DEG;
+}
+
+/* A gyro bias of the size measured on the Meteor board (~0.09 deg/s per axis)
+ * integrates straight into the vertical reference once corrections are off.
+ * The pad, with the aggregator's 24 s standby resets, must leave the flight
+ * with that bias removed. */
+static void test_pad_gyro_bias_is_removed_before_flight(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+
+    const float bias[3] = {-0.0015f, -0.0014f, 0.0008f};   /* rad/s */
+    attitude_input_t in = level_input();
+    for (int i = 0; i < 3; i++) in.gyro_rads[i] = bias[i];
+    in.zupt_active = true;
+
+    for (int k = 1; k <= 60 * EST_HZ; k++) {
+        attitude_update(&est, &in);
+        if (k % (24 * EST_HZ) == 0) attitude_reset(&est);
+    }
+    assert(est.q_valid);
+    float tilt_launch = nose_tilt_deg(&est);
+
+    in.zupt_active           = false;
+    in.corrections_inhibited = true;
+    for (int k = 0; k < 20 * EST_HZ; k++) attitude_update(&est, &in);
+
+    float drift = fabsf(nose_tilt_deg(&est) - tilt_launch);
+    printf("  pad bias 0.09 deg/s -> 20 s gyro-only tilt drift %.3f deg\n", drift);
+    assert(drift < 0.1f);
+    for (int i = 0; i < 3; i++)
+        assert(fabsf(est.ang_vel[i]) < 1e-4f);
+}
+
+/* A bump on the rail is motion, not bias: the pad estimate must not absorb it. */
+static void test_pad_bump_does_not_corrupt_gyro_bias(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+
+    attitude_input_t in = level_input();
+    in.gyro_rads[0] = -0.0015f;
+    in.zupt_active  = true;
+    for (int k = 0; k < 30 * EST_HZ; k++) attitude_update(&est, &in);
+
+    in.gyro_rads[0] = 0.52f;                         /* 30 deg/s for 1 s */
+    for (int k = 0; k < EST_HZ; k++) attitude_update(&est, &in);
+    in.gyro_rads[0] = -0.0015f;
+    for (int k = 0; k < 10 * EST_HZ; k++) attitude_update(&est, &in);
+
+    assert(fabsf(est.gyro_bias[0] - (-0.0015f)) < 1e-4f);
+}
+
 int main(void)
 {
     test_gravity_init_level();
+    test_pad_gyro_bias_is_removed_before_flight();
+    test_pad_bump_does_not_corrupt_gyro_bias();
     test_imu_stall_in_flight_recovers_validity();
     test_inhibited_corrections_leave_the_estimate_to_the_gyro();
     test_gyro_integration_90deg();
