@@ -497,6 +497,31 @@ static void test_rate_fresh_tracks_imu_validity(void)
     CHECK(!est.rate_fresh);
 }
 
+/* A standby reset empties the accel ring; the short averages that follow must not break a still run. */
+static void test_standby_reset_keeps_still_run(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+
+    attitude_input_t in = level_input();
+    in.zupt_active = true;
+    unsigned seed = 12345u;
+    for (int k = 0; k < 10 * EST_HZ; k++) {
+        if (k == 5 * EST_HZ) attitude_reset(&est);
+        /* ~1 mg of sample noise: one sample alone tilts ~0.06 deg, the 20-sample mean far less. */
+        for (int i = 0; i < 3; i++) {
+            seed = seed * 1103515245u + 12345u;
+            float n = ((float)((seed >> 16) & 0x7FFF) / 32767.0f - 0.5f) * 0.035f;
+            in.accel_mps2[i] = (i == 2 ? GRAVITY : 0.0f) + n;
+        }
+        attitude_update(&est, &in);
+    }
+    /* Only the two ring fills (power-up and reset) are not counted. */
+    CHECK_NEAR((float)est.still_ticks, 10.0f * EST_HZ - 2.0f * cfg.n_avg, 2.0f);
+}
+
 int main(void)
 {
     test_gravity_init_level();
@@ -505,6 +530,7 @@ int main(void)
     test_gyro_bias_recovers_from_motion_at_power_up();
     test_slow_rail_raise_is_not_learned_as_bias();
     test_rate_fresh_tracks_imu_validity();
+    test_standby_reset_keeps_still_run();
     test_imu_stall_in_flight_recovers_validity();
     test_inhibited_corrections_leave_the_estimate_to_the_gyro();
     test_gyro_integration_90deg();

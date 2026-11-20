@@ -109,6 +109,10 @@ void attitude_reset(attitude_t *est)
 static bool pad_is_still(attitude_t *est, const float gyro[3], const float acc[3])
 {
     const attitude_config_t *c = &est->cfg;
+    /* Right after attitude_reset the ring holds a few samples, too noisy to judge. */
+    if (est->buf_count < c->n_avg)
+        return est->still_ticks >= est->still_need_ticks;
+
     const float g_ref = est->calib.done ? est->calib.mag_mean : GRAVITY;
     const float mag   = sqrtf(acc[0]*acc[0] + acc[1]*acc[1] + acc[2]*acc[2]);
 
