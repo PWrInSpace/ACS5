@@ -144,6 +144,16 @@ void HAL_SD_MspDeInit(SD_HandleTypeDef* sdHandle)
 }
 
 /* USER CODE BEGIN 1 */
-
+/* Fields only, no HAL_SD_Init: FatFs inits the card on f_mount and reports a missing
+ * one, where MX_SDMMC1_SD_Init (call disabled in .ioc) halts the MCU. Mirror its fields. */
+void sdmmc1_configure_handle(void)
+{
+  hsd1.Instance = SDMMC1;
+  hsd1.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+  hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+  hsd1.Init.BusWide = SDMMC_BUS_WIDE_4B;
+  hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_DISABLE;
+  hsd1.Init.ClockDiv = 4;
+}
 /* USER CODE END 1 */
 

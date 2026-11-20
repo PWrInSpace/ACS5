@@ -231,7 +231,8 @@ void StartAggregator(void *argument)
     if (!axes_remap_is_rotation(&mag_cfg.axes))
         USB_PRINTF("[ERROR] BOARD_MAG_REMAP is not a rotation - check axes.h\r\n");
     if (!mmc5983ma_init(&g_mag, &hspi2, MAG_CS_GPIO_Port, MAG_CS_Pin))
-        USB_PRINTF("[ERROR] Mag init FAILED\r\n");
+        USB_PRINTF("[ERROR] Mag init FAILED (ID 0x%02X, expected 0x30)\r\n",
+                   (unsigned)g_mag.product_id);
     else if (!mmc5983ma_configure(&g_mag, &mag_cfg))
         USB_PRINTF("[ERROR] Mag configure FAILED\r\n");
     else
