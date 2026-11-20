@@ -70,6 +70,7 @@ set(ACS5_SOURCES
     Core/Src/sensor_drivers/baro/ms5611.c
     Core/Src/sensor_drivers/baro/ms5611_math.c
     Core/Src/sensor_drivers/mag/mmc5983ma.c
+    Core/Src/sensor_drivers/mag/mmc5983ma_math.c
     Core/Src/sensor_drivers/servos/servo_t75.c
     Core/Src/sensor_drivers/servos/servo_t75_math.c
     Core/Src/sensor_drivers/servos/servo_bench.c

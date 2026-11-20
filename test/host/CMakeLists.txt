@@ -36,6 +36,7 @@ acs5_host_test(test_flight_pipeline filter/attitude.c filter/mahony.c utils/quat
                flight/flight_sm.c flight/estimator_policy.c control/qbar.c)
 acs5_host_test(test_geo_ned         utils/geo_ned.c)
 acs5_host_test(test_ms5611_math     sensor_drivers/baro/ms5611_math.c)
+acs5_host_test(test_mmc5983ma_math  sensor_drivers/mag/mmc5983ma_math.c)
 acs5_host_test(test_qbar            control/qbar.c)
 acs5_host_test(test_quat            utils/quat.c)
 acs5_host_test(test_roll_ctrl       control/roll_ctrl.c utils/quat.c)

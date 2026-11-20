@@ -84,3 +84,11 @@ float ms5611_interval_s(uint32_t now_us, uint32_t prev_us)
     if (dt_s <= MS5611_MIN_INTERVAL_S || dt_s >= MS5611_MAX_INTERVAL_S) return 0.0f;
     return dt_s;
 }
+
+bool ms5611_prom_plausible(const uint16_t prom[8])
+{
+    for (int i = 1; i <= 6; i++)
+        if (prom[i] == 0x0000u || prom[i] == 0xFFFFu)
+            return false;
+    return true;
+}

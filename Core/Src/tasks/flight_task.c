@@ -8,6 +8,7 @@
 #include "flight/estimator_policy.h"
 #include "control/qbar.h"
 #include "control/roll_ctrl.h"
+#include "sensor_drivers/mag/mmc5983ma_math.h"
 #include "sensor_drivers/servos/servo_t75.h"
 #include "sensor_drivers/servos/canard_lock.h"
 #ifdef ACS5_SERVO_BENCH
@@ -26,6 +27,7 @@
 #include "usb_device.h"
 #include "usb_print.h"
 #include "buzzer/buzzer.h"
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 
@@ -65,6 +67,9 @@ static void halt_forever(const char *msg)
 #define LOG_INTERVAL_STANDBY   SEC_TO_TICKS(0.24f)   /* lowered for bench testing */
 #define STANDBY_RESET_INTERVAL SEC_TO_TICKS(24.0f)
 #define TELEMETRY_INTERVAL     HZ_TO_TICKS(12.5f)
+/* |B| reference: mean of the first pad samples; later samples must stay within MAG_REF_TOL. */
+#define MAG_REF_SAMPLES        100u
+#define MAG_REF_TOL            0.3f
 /* A brown-out of the IMU alone powers its sensors off; reads then fail forever. */
 #define IMU_REINIT_AFTER       SEC_TO_TICKS(0.1f)
 #define IMU_REINIT_EVERY       SEC_TO_TICKS(1.0f)
@@ -175,9 +180,14 @@ static void sensors_init(void)
 
     /* -- Barometer -------------------------------------------------------- */
     ms5611_config_t baro_cfg = ms5611_config_rocket_default();
-    if (!ms5611_init(&g_baro, &hspi2, BARO_CS_GPIO_Port, BARO_CS_Pin, &baro_cfg))
-        USB_PRINTF("[ERROR] Baro init FAILED\r\n");
-    else
+    bool baro_up = false;
+    for (int attempt = 1; attempt <= 3 && !baro_up; attempt++)
+    {
+        baro_up = ms5611_init(&g_baro, &hspi2, BARO_CS_GPIO_Port, BARO_CS_Pin, &baro_cfg);
+        if (!baro_up)
+            USB_PRINTF("[ERROR] Baro init FAILED (attempt %d/3)\r\n", attempt);
+    }
+    if (baro_up)
         USB_PRINTF("[OK] Baro Initialized\r\n");
 
 
@@ -274,6 +284,8 @@ void StartFlightTask(void *argument)
 
     baro_datum_t baro_datum   = {0};
     uint32_t imu_fail_streak  = 0;
+    float    mag_ref_ut       = 0.0f;
+    uint32_t mag_ref_n        = 0;
     bool     calib_reported   = false;
 
     USB_PRINTF("Gravity calibration starting (%d samples = %.0f s)...\r\n",
@@ -319,6 +331,17 @@ void StartFlightTask(void *argument)
         bool mag_ok = false;
         if (loop_counter % MAG_INTERVAL == 0)
             mag_ok = mmc5983ma_read(&g_mag, &flight_data.mag_sample);
+        if (mag_ok)
+        {
+            /* A nearby magnet or current loop shifts |B| before it saturates. */
+            const float *b = flight_data.mag_sample.field_ut;
+            const float mag = sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+            if (mag_ref_n < MAG_REF_SAMPLES && g_sm.state == FLIGHT_STATE_STANDBY)
+                mag_ref_ut += (mag - mag_ref_ut) / (float)(++mag_ref_n);
+            else
+                mag_ok = mag_ref_n == MAG_REF_SAMPLES &&
+                         mmc5983ma_magnitude_plausible(mag, mag_ref_ut, MAG_REF_TOL);
+        }
 
         /* -- 2. Baro: ms5611_update advances one state per call. In steady
          * state one poll reads D1 and publishes; the temperature refresh costs

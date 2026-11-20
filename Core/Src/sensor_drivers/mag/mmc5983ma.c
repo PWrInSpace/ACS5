@@ -1,4 +1,5 @@
 #include "sensor_drivers/mag/mmc5983ma.h"
+#include "sensor_drivers/mag/mmc5983ma_math.h"
 #include "utils/timestamp.h"
 
 #include "FreeRTOS.h"
@@ -26,11 +27,9 @@ enum
     AUTO_SR_EN  = 0x20,
     SW_RST      = 0x80,
     CMM_EN      = 0x08,
+    EN_PRD_SET  = 0x80,   /* CTRL2: periodic SET in continuous mode */
+    PRD_SET_25  = 0x10,   /* CTRL2: one SET every 25 measurements */
 };
-
-/* 18-bit output is unsigned, centered at 2^17; 16384 counts/Gauss, 1 Gauss = 100 uT */
-static const float kScale  = 100.0f / 16384.0f;
-static const float kOffset = 131072.0f;
 
 /* Datasheet fc(SCK): "values are guaranteed at 10 MHz clock frequency for SPI,
  * based on characterization results, not tested in production". This is the
@@ -97,11 +96,11 @@ bool mmc5983ma_init(mmc5983ma_t *self, SPI_HandleTypeDef *spi, GPIO_TypeDef *cs_
         return false;
     }
 
-    /* 4. MANDATORY DEGAUSS (Set/Reset Pulse)
-     * This clears any "stuck" magnetic states causing the 799.99 uT readings. */
-    write_reg(self, REG_CTRL0, DO_SET);
-    vTaskDelay(pdMS_TO_TICKS(1));
+    /* Degauss. SET last: the datasheet axis polarity is defined after a SET,
+     * and the periodic SETs configured later would otherwise flip it. */
     write_reg(self, REG_CTRL0, DO_RESET);
+    vTaskDelay(pdMS_TO_TICKS(1));
+    write_reg(self, REG_CTRL0, DO_SET);
     vTaskDelay(pdMS_TO_TICKS(1));
 
     self->initialized = true;
@@ -129,10 +128,13 @@ bool mmc5983ma_configure(mmc5983ma_t *self, const mmc5983ma_config_t *cfg)
     if (!write_reg(self, REG_CTRL0, ctrl0))
         return false;
 
-    /* CTRL2: continuous */
+    /* CTRL2: continuous. Auto_SR_en alone does nothing in continuous mode;
+     * periodic SET needs En_prd_set as well. */
     uint8_t ctrl2 = (uint8_t)cfg->cm_freq;
     if (cfg->cm_freq != MMC5983MA_CM_OFF)
         ctrl2 |= CMM_EN;
+    if (cfg->auto_set_reset && cfg->cm_freq != MMC5983MA_CM_OFF)
+        ctrl2 |= EN_PRD_SET | PRD_SET_25;
 
     if (!write_reg(self, REG_CTRL2, ctrl2))
         return false;
@@ -140,18 +142,6 @@ bool mmc5983ma_configure(mmc5983ma_t *self, const mmc5983ma_config_t *cfg)
     self->axes       = cfg->axes;
     self->configured = true;
     return true;
-}
-
-/* =========================
- * Data ready
- * ========================= */
-
-static bool mmc5983ma_data_ready(mmc5983ma_t *self)
-{
-    uint8_t st = 0;
-    if (!read_reg(self, REG_STATUS, &st)) return false;
-
-    return (st & MEAS_M_DONE);
 }
 
 /* =========================
@@ -163,24 +153,21 @@ bool mmc5983ma_read(mmc5983ma_t *self, mmc5983ma_sample_t *sample)
     /* Without cfg.axes installed there is no body frame to report a sample in,
      * and a zeroed remap would answer with a plausible-looking {0,0,0} field. */
     if (!self->configured) return false;
-    if (!mmc5983ma_data_ready(self)) return false;
 
-    uint8_t buf[7];
-
-    if (!read_regs(self, REG_XOUT0, buf, 7))
+    /* Data and STATUS in one burst. Meas_M_Done stays set until written back as 1. */
+    uint8_t buf[REG_STATUS - REG_XOUT0 + 1];
+    if (!read_regs(self, REG_XOUT0, buf, sizeof buf))
         return false;
+    if ((buf[REG_STATUS - REG_XOUT0] & MEAS_M_DONE) == 0U)
+        return false;
+    (void)write_reg(self, REG_STATUS, MEAS_M_DONE);
 
-    /* Each axis is 18 bits: two whole bytes plus a 2-bit field in buf[6],
-     * packed X,Y,Z from the top of that byte down. */
+    uint32_t raw[3];
+    mmc5983ma_unpack(buf, raw);
+    if (mmc5983ma_saturated(raw))
+        return false;
     for (int i = 0; i < 3; i++)
-    {
-        uint32_t raw =
-            ((uint32_t)buf[2 * i]     << 10) |
-            ((uint32_t)buf[2 * i + 1] << 2)  |
-            ((buf[6] >> (6 - 2 * i)) & 0x03);
-
-        sample->field_raw_ut[i] = ((float)raw - kOffset) * kScale;
-    }
+        sample->field_raw_ut[i] = mmc5983ma_raw_to_ut(raw[i]);
 
     axes_remap_apply(&self->axes, sample->field_raw_ut, sample->field_ut);
 
@@ -196,7 +183,8 @@ bool mmc5983ma_read(mmc5983ma_t *self, mmc5983ma_sample_t *sample)
 mmc5983ma_config_t mmc5983ma_config_rocket_default(void)
 {
     return (mmc5983ma_config_t){
-        .bandwidth      = MMC5983MA_BW_400,
+        /* 100 Hz continuous needs BW >= 200 Hz; the narrowest that fits is the quietest. */
+        .bandwidth      = MMC5983MA_BW_200,
         .cm_freq        = MMC5983MA_CM_100HZ,
         .auto_set_reset = true,
         /* The board, not the driver, knows how the package is mounted. */

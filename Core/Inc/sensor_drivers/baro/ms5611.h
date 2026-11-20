@@ -93,6 +93,7 @@ typedef struct
     uint8_t  temp_countdown;    /* pressure-only cycles left before D2 is due */
 
     uint32_t conv_start_us;
+    uint32_t d1_read_us;        /* when raw_d1 was read: the sample's time */
     uint32_t error_count;
 
     uint32_t prev_publish_us;   /* end-of-conversion time of the previous publish, for dt_s */

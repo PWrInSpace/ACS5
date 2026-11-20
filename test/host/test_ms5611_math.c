@@ -77,6 +77,20 @@ static void test_interval_dwt_wrap(void) {
     CHECK(ms5611_interval_s(100000u, 14200000u) == 0.0f);
 }
 
+/* A dead or absent part reads all-zero (MISO low) or all-one PROM; the zero PROM even passes CRC-4. */
+static void test_dead_part_prom_is_rejected(void) {
+    const uint16_t zeros[8] = {0};
+    const uint16_t ones[8]  = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    CHECK(ms5611_verify_crc4(zeros));
+    CHECK(!ms5611_prom_plausible(zeros));
+    CHECK(!ms5611_prom_plausible(ones));
+
+    uint16_t one_bad[8] = {0, 40127, 36924, 23317, 23282, 33464, 28312, 0};
+    CHECK(ms5611_prom_plausible(one_bad));
+    one_bad[4] = 0x0000;
+    CHECK(!ms5611_prom_plausible(one_bad));
+}
+
 int main(void) {
     test_datasheet_golden();
     test_altitude_self_consistency();
@@ -87,5 +101,6 @@ int main(void) {
     test_interval_too_short();
     test_interval_too_long();
     test_interval_dwt_wrap();
+    test_dead_part_prom_is_rejected();
     return test_report("ms5611_math");
 }

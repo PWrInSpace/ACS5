@@ -75,7 +75,14 @@ static bool read_adc(ms5611_t *self, uint32_t *result)
         return false;
     }
 
-    *result = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+    /* The part answers 0 to a read before the conversion finished or a repeated read. */
+    const uint32_t v = ((uint32_t)rx[0] << 16) | ((uint32_t)rx[1] << 8) | rx[2];
+    if (v == 0U)
+    {
+        report_error(self);
+        return false;
+    }
+    *result = v;
     return true;
 }
 
@@ -120,8 +127,8 @@ bool ms5611_init(ms5611_t *self, SPI_HandleTypeDef *spi,
     uint16_t prom[8] = {0};
     if (!read_prom(self, prom)) return false;
 
-    // 3. Verify CRC-4
-    if (!ms5611_verify_crc4(prom))
+    // 3. Verify CRC-4, and reject the all-0/all-1 PROM of a dead bus
+    if (!ms5611_verify_crc4(prom) || !ms5611_prom_plausible(prom))
     {
         return false;
     }
@@ -163,9 +170,9 @@ static void compute_and_publish(ms5611_t *self)
         return;
     }
 
-    // timestamp_us() is a register read; take it once and reuse it for both the
-    // stamp and the interval so the two cannot disagree.
-    uint32_t now_us = timestamp_us();
+    /* The pressure is from the D1 conversion; on a temperature cycle the publish
+     * comes one poll later, so the publish time would skew dt_s. */
+    const uint32_t now_us = self->d1_read_us;
 
     taskENTER_CRITICAL();
     self->last_sample.pressure_pa   = pressure_pa;
@@ -211,6 +218,7 @@ void ms5611_update(ms5611_t *self)
                     self->state = STATE_CONVERT_D1; // Retry on fail
                     break;
                 }
+                self->d1_read_us = timestamp_us();
 
                 /* Die temperature moves in seconds, pressure in milliseconds.
                  * Refreshing D2 every cycle would halve the pressure rate for
