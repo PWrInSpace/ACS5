@@ -243,6 +243,7 @@ void StartFlightTask(void *argument)
      * every integrator from wall time. Report the achieved rate instead. */
     uint32_t last_report_ms = wake_time;
     uint32_t overrun_count  = 0;
+    uint32_t busy_max_cycles = 0;   /* longest loop body since the last report */
 
     /* State estimation */
     attitude_config_t est_cfg = attitude_config_default();
@@ -276,6 +277,8 @@ void StartFlightTask(void *argument)
 
     for (;;)
     {
+        const uint32_t body_start = timestamp_cycles();
+
         /* -- 1. IMU (CONTROL_LOOP_HZ) ------------------------------------- */
         /* A failed read leaves the previous sample in place; imu_ok is what
          * tells the estimator not to integrate it again. */
@@ -490,9 +493,11 @@ void StartFlightTask(void *argument)
             last_report_ms  = now_ms;
 
             HAL_GPIO_TogglePin(LD1_GPIO_Port, LD1_Pin);
-            USB_PRINTF("[%-7s] %.0f Hz ovr=%lu | ", flight_state_name(g_sm.state),
+            USB_PRINTF("[%-7s] %.0f Hz ovr=%lu busy=%lu us | ", flight_state_name(g_sm.state),
                        span ? (1000.0f * TELEMETRY_INTERVAL / (float)span) : 0.0f,
-                       (unsigned long)overrun_count);
+                       (unsigned long)overrun_count,
+                       (unsigned long)(busy_max_cycles / CYCLES_PER_US));
+            busy_max_cycles = 0;
             {
                 float euler[3];
                 attitude_euler(&g_est, euler);
@@ -517,6 +522,9 @@ void StartFlightTask(void *argument)
         }
 
         /* -- 10. Timing ---------------------------------------------------- */
+        const uint32_t body_cycles = timestamp_cycles() - body_start;
+        if (body_cycles > busy_max_cycles)
+            busy_max_cycles = body_cycles;
         loop_counter++;
         wake_time += TICK_MS;
         /* Signed compare so the count stays right across the tick-count wrap. */

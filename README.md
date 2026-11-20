@@ -21,10 +21,14 @@ Camera (SPLIT V3) turns on at the STANDBY → ACCELERATION transition.
 
 ## Build
 
+Flight image (`-O2`, LTO):
+
 ```bash
-cmake --preset Debug
-cmake --build --preset Debug
+cmake --preset Release
+cmake --build --preset Release   # -> build/Release/ACS5.elf
 ```
+
+The `Debug` preset (`-O0 -g3`) is for the debugger only.
 
 J4 CH1 has no MCU pin on this board revision. Until the 3-axis controller
 lands, flight firmware holds the canards neutral and the lock closed.
