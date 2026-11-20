@@ -66,54 +66,15 @@ static void camera_set_enabled(bool on)
  * blend constant, so a dead part is caught before it can drag pos Z. */
 #define BARO_MAX_AGE_US        100000u
 
-static const BuzzerNote_t BARKA_CHORUS[] = {
-    { 2093, 1947 },
-    { 3520,  968 },
-    { 3520,  968 },
-    { 3520,  316 },
-    { 3951,  316 },
-    { 4186,  316 },
-    { 3951,  316 },
-    { 3520,  316 },
-    { 3136,  316 },
-    { 3136,  968 },
-    { 3136,  968 },
-    { 2960,  642 },
-    { 2637,  316 },
-    { 2637,  968 },
-    { 2637,  968 },
-    { 2637,  316 },
-    { 2794,  316 },
-    { 3136,  316 },
-    { 2794,  316 },
-    { 2637,  316 },
-    { 2349,  316 },
-    { 2637, 1946 },
-    { 2093,  968 },
-    { 2093,  968 },
-    { 3520,  968 },
-    { 3520,  968 },
-    { 3520,  316 },
-    { 3951,  316 },
-    { 4186,  316 },
-    { 3951,  316 },
-    { 3520,  316 },
-    { 3136,  316 },
-    { 3136,  968 },
-    { 3136,  968 },
-    { 2794,  642 },
-    { 2637,  316 },
-    { 2794,  968 },
-    { 2794, 1284 },
-    { 2349,  316 },
-    { 2637,  316 },
-    { 2794,  316 },
-    { 2637,  316 },
-    { 2349,  316 },
-    { 2093, 1294 },
+/* Rising C-major arpeggio, ~0.7 s. */
+static const BuzzerNote_t STARTUP_CHIME[] = {
+    { 2093, 120 },
+    { 2637, 120 },
+    { 3136, 120 },
+    { 4186, 300 },
 };
-static const uint16_t BARKA_CHORUS_LEN =
-    (uint16_t)(sizeof(BARKA_CHORUS) / sizeof(BARKA_CHORUS[0]));
+static const uint16_t STARTUP_CHIME_LEN =
+    (uint16_t)(sizeof(STARTUP_CHIME) / sizeof(STARTUP_CHIME[0]));
 
 
 #ifdef ACS5_SERVO_BENCH
@@ -267,11 +228,9 @@ void StartAggregator(void *argument)
     camera_set_enabled(false);
     USB_PRINTF("[OK] Cameras OFF (SPLIT V3 MOSFET low)\r\n");
 
-    USB_PRINTF("[BUZZER] Playing Barka (~20 s)...\r\n");
     Buzzer_Init(&htim15);
-    Buzzer_PlayMelody(BARKA_CHORUS, BARKA_CHORUS_LEN);
-    osDelay(1000);
-    USB_PRINTF("[BUZZER] Done.\r\n");
+    Buzzer_PlayMelody(STARTUP_CHIME, STARTUP_CHIME_LEN);
+    USB_PRINTF("[OK] Startup chime played\r\n");
 
     /* -- Flight Data & Timing -------------------------------------------- */
     flight_data_t flight_data = {0};
