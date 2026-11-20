@@ -76,6 +76,7 @@ typedef struct
     axes_remap_t axes;
     bool     initialized;
     bool     configured;   /* read() needs cfg.axes, which only configure() installs */
+    uint8_t  product_id;   /* last ID read by init(); 0x30 when the part answers */
     uint32_t error_count;
 } mmc5983ma_t;
 

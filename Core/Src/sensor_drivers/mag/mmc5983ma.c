@@ -91,7 +91,9 @@ bool mmc5983ma_init(mmc5983ma_t *self, SPI_HandleTypeDef *spi, GPIO_TypeDef *cs_
 
     /* 3. Check ID */
     uint8_t id = 0;
-    if (!read_reg(self, REG_PRODUCT, &id) || id != 0x30) {
+    bool id_read = read_reg(self, REG_PRODUCT, &id);
+    self->product_id = id;
+    if (!id_read || id != 0x30) {
         return false;
     }
 

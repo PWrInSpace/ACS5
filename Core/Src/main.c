@@ -12,7 +12,6 @@
 #include "cmsis_os2.h"
 #include "dma.h"
 #include "fatfs.h"
-#include "sdmmc.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
@@ -21,6 +20,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "sdmmc.h"
 #include "usb_print.h"
 #include <stdio.h>
 #include <string.h>
@@ -129,11 +129,11 @@ int main(void)
   MX_SPI2_Init();
   MX_UART7_Init();
   MX_TIM3_Init();
-  MX_SDMMC1_SD_Init();
   MX_FATFS_Init();
   MX_TIM2_Init();
   MX_TIM15_Init();
   /* USER CODE BEGIN 2 */
+  sdmmc1_configure_handle();
   HAL_Delay(1000);
   HAL_GPIO_WritePin(LD1_GPIO_Port, LD1_Pin, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);

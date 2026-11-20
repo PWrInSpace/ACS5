@@ -69,7 +69,7 @@ void Error_Handler(void);
 #define GPS_INT_GPIO_Port GPIOC
 #define LD1_Pin GPIO_PIN_8
 #define LD1_GPIO_Port GPIOA
-#define SD_DETECT_Pin GPIO_PIN_0
+#define SD_DETECT_Pin GPIO_PIN_1
 #define SD_DETECT_GPIO_Port GPIOD
 
 /* USER CODE BEGIN Private defines */

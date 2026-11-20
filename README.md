@@ -10,7 +10,7 @@ the MAX-M10S GNSS driver already developed for ACS5.
 | IMU CS | PD8 | **PD13** |
 | BARO CS | PD11 | **PD10** |
 | MAG CS | PB12 | **PD8** |
-| SD detect | PC0 | **PD0** |
+| SD detect | PC0 | **PD1** |
 | LEDs | PA1/2/3 | **PA8 / PA4** |
 | Buzzer | PE5 TIM15 | PE5 TIM15 (unchanged) |
 | GNSS | — | **UART7 PE8 TX / PE7 RX** |
