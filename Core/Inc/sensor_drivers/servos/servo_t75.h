@@ -1,8 +1,5 @@
-/*
- * SRT Servo T75 HV bank driver: 4 fins on one TIM, driven as PWM channels.
- * Per-fin trim/limits/direction live in the config; angle->pulse mapping and
- * slew limiting come from servo_t75_math. Pins stay dark until arm().
- */
+/* SRT T75 HV bank driver: 4 fins as PWM channels of one TIM, per-fin trim/limits/direction
+ * and slew limiting; no pulse until arm(). */
 #pragma once
 
 #include <stdbool.h>

@@ -31,9 +31,8 @@ enum
     PRD_SET_25  = 0x10,   /* CTRL2: one SET every 25 measurements */
 };
 
-/* Datasheet fc(SCK): "values are guaranteed at 10 MHz clock frequency for SPI,
- * based on characterization results, not tested in production". This is the
- * lowest ceiling on the shared bus - the other two parts take 20 and 24 MHz. */
+/* Datasheet fc(SCK): guaranteed at 10 MHz by characterization, not production-tested.
+ * The lowest ceiling on the shared bus (the others take 20 and 24 MHz). */
 #define MMC5983MA_MAX_SCK_HZ 10000000U
 
 static void report_error(mmc5983ma_t *self)

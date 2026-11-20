@@ -54,17 +54,15 @@ static void test_twist_ignores_swing(void)
     quat_t swing = axis_angle(1, 0, 0, 0.3f);
     CHECK(near(quat_twist_angle(quat_mul(swing, twist), z_axis), 0.5f, 1e-4f));
 
-    /* Even a 180 deg swing must not corrupt the twist - that is the attitude the
-     * rocket reaches if it tumbles, and the roll angle must stay readable. */
+    /* A 180 deg swing (tumble) leaves the twist readable. */
     quat_t flipped = quat_mul(axis_angle(1, 0, 0, PI_F), twist);
     CHECK(near(quat_twist_angle(flipped, z_axis), 0.5f, 1e-4f));
 }
 
 static void test_twist_survives_double_cover(void)
 {
-    /* The estimator may emit -q for the same rotation. The roll controller
-     * accumulates twist deltas, so a sign flip would corrupt the maneuver
-     * angle permanently. */
+    /* The estimator may emit -q for the same rotation; the roll controller
+     * accumulates twist deltas, so both signs must give the same twist. */
     const float z_axis[3] = {0, 0, 1};
     quat_t q  = quat_mul(axis_angle(1, 0, 0, 0.3f), axis_angle(0, 0, 1, 0.5f));
     quat_t nq = {-q.w, -q.x, -q.y, -q.z};
@@ -78,8 +76,7 @@ static void test_normalize(void)
     CHECK(near(n, 1.0f, 1e-6f));
     CHECK(near(q.w, 0.7071068f, 1e-5f) && near(q.z, 0.7071068f, 1e-5f));
 
-    /* Degenerate input must fall back to identity, not divide by ~0 - this is
-     * the estimator's guard against a collapsed quaternion. */
+    /* Degenerate input falls back to identity. */
     quat_t z = quat_normalize((quat_t){0.0f, 0.0f, 0.0f, 0.0f});
     CHECK(near(z.w, 1.0f, 1e-6f) && near(z.x, 0, 1e-6f) &&
            near(z.y, 0, 1e-6f) && near(z.z, 0, 1e-6f));

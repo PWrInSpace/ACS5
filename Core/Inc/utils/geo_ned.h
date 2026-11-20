@@ -1,13 +1,5 @@
-/*
- * ACS5 - local North-East-Down coordinates from WGS-84 geodetic positions.
- *
- * Pick a datum (the pad), then convert later positions into metres relative to
- * it. Flat-earth scale factors computed once at the datum, which is accurate for
- * the few kilometres a flight covers. Down is positive.
- *
- * Positions are integers as a GNSS receiver reports them: latitude and
- * longitude in degrees * 1e7, height in millimetres.
- */
+/* Local NED metres (down positive) from WGS-84 positions in deg*1e7 and mm, relative to a datum.
+ * Flat-earth scale factors fixed at the datum, accurate over the few km a flight covers. */
 #pragma once
 
 #include <stdbool.h>

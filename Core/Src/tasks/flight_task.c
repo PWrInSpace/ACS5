@@ -42,7 +42,7 @@ static const float k_roll_axis[3] = { [BODY_AXIS_ROLL] = 1.0f };
 static servo_bank_t75_t g_servos;
 
 
-/* SPLIT V3: MOSFET gate HIGH powers the camera. PC0/PC2 held off for now. */
+/* SPLIT V3 camera: MOSFET gate HIGH powers it. Only PC1 is driven. */
 static void camera_set_enabled(bool on)
 {
     GPIO_PinState s = on ? GPIO_PIN_SET : GPIO_PIN_RESET;
@@ -66,7 +66,7 @@ static void halt_forever(const char *msg)
  * spends an SPI status transaction to be told the sample has not changed. */
 #define MAG_INTERVAL           HZ_TO_TICKS(100.0f)
 #define LOG_INTERVAL_FLIGHT    SEC_TO_TICKS(0.008f)
-#define LOG_INTERVAL_STANDBY   SEC_TO_TICKS(0.24f)   /* lowered for bench testing */
+#define LOG_INTERVAL_STANDBY   SEC_TO_TICKS(0.24f)   /* bench-testing rate */
 #define STANDBY_RESET_INTERVAL SEC_TO_TICKS(24.0f)
 #define TELEMETRY_INTERVAL     HZ_TO_TICKS(12.5f)
 /* |B| reference: mean of the first pad samples; later samples must stay within MAG_REF_TOL. */
@@ -76,10 +76,8 @@ static void halt_forever(const char *msg)
 #define IMU_REINIT_AFTER       SEC_TO_TICKS(0.1f)
 #define IMU_REINIT_EVERY       SEC_TO_TICKS(1.0f)
 
-/* Five times the worst legitimate gap between publishes: pressure lands on
- * every poll except the one cycle in MS5611_TEMP_EVERY_N spent on temperature,
- * which stretches that gap to two polls. Well inside the estimator's 0.5 s baro
- * blend constant, so a dead part is caught before it can drag pos Z. */
+/* 5x the worst publish gap (two polls on a temperature cycle); well inside the
+ * estimator's 0.5 s baro blend, so a dead part cannot drag pos Z. */
 #define BARO_MAX_AGE_US        100000u
 /* Horizon of flight_sm's baro velocity filter: past this its output is frozen. */
 #define BARO_VEL_MAX_AGE_US    500000u
@@ -170,14 +168,11 @@ static void report_previous_fault(void)
 static void sensors_init(void)
 {
     /* -- IMU -------------------------------------------------------------- */
-    /* Estimation and roll control are unrecoverable without inertial data, and
-     * a configure that fails partway leaves the part powered down while still
-     * reporting initialized. A dead IMU therefore has to keep the vehicle on
-     * the pad: no servo arming, no canard unlock, no control loop. */
+    /* No estimation or control without inertial data: a dead IMU keeps the vehicle
+     * on the pad (no servo arming, no canard unlock, no control loop). */
     iim42653_config_t imu_cfg = iim42653_config_rocket_default();
     imu_cfg.axes = BOARD_IMU_REMAP;
-    /* configure() rejects a bad remap the same way it rejects a dead part, and
-     * BOARD_*_REMAP is a build-time constant - say which one it is. */
+    /* configure() fails the same way on a bad remap as on a dead part; name the remap. */
     if (!axes_remap_is_rotation(&imu_cfg.axes))
         halt_forever("BOARD_IMU_REMAP is not a rotation - check axes.h");
     bool imu_up = false;
@@ -274,9 +269,8 @@ void StartFlightTask(void *argument)
     uint32_t wake_time     = osKernelGetTickCount();
     uint32_t loop_counter  = 0;
 
-    /* Every dt in this task is a constant, not a measurement, so a loop body
-     * that outgrows TICK_MS would slip osDelayUntil silently and desynchronise
-     * every integrator from wall time. Report the achieved rate instead. */
+    /* Every dt here is a constant, so an overrunning loop silently desynchronises
+     * the integrators from wall time; measure and report the achieved rate. */
     uint32_t last_report_ms = wake_time;
     uint32_t overrun_count  = 0;
     uint32_t busy_max_cycles = 0;   /* longest loop body since the last report */
@@ -361,11 +355,7 @@ void StartFlightTask(void *argument)
                          mmc5983ma_magnitude_plausible(mag, mag_ref_ut, MAG_REF_TOL);
         }
 
-        /* -- 2. Baro: ms5611_update advances one state per call. In steady
-         * state one poll reads D1 and publishes; the temperature refresh costs
-         * an extra poll, so publishes track the poll rate less that one cycle
-         * in MS5611_TEMP_EVERY_N. The driver measures each sample's dt_s (with
-         * the timestamp-wrap guard); we just forward it. */
+        /* -- 2. Baro: one ms5611_update state per call; dt_s is driver-measured. */
         bool  baro_fresh = false;
         float baro_dt_s  = 0.0f;
         if (loop_counter % BARO_INTERVAL == 0)
@@ -472,8 +462,8 @@ void StartFlightTask(void *argument)
                        (int)prev_arm, (int)g_arm.state,
                        flight_data.baro_sample.altitude_m);
 
-        /* |v| from the estimator is sound: vertical is baro-anchored and the
-         * vehicle is near vertical through the maneuver. */
+        /* Estimator |v| suffices: vertical is baro-anchored and the vehicle is near
+         * vertical through the maneuver. */
         float qbar_pa = qbar_from_baro(est_in.baro_valid,
                                        flight_data.baro_sample.pressure_pa,
                                        flight_data.baro_sample.temperature_c,
@@ -494,8 +484,7 @@ void StartFlightTask(void *argument)
                        (int)prev_phase, (int)g_rc.phase, g_rc.theta_meas * RAD2DEG);
 
         /* -- 6. Servos ---------------------------------------------------- */
-        /* Held neutral and locked until the 3-axis controller replaces roll_ctrl;
-         * delta_rad is still computed and logged. */
+        /* Canards held neutral and locked: delta_rad is computed and logged, not actuated. */
         for (uint8_t i = 0; i < SERVO_T75_FIN_COUNT; i++)
             servo_bank_t75_set_angle_deg(&g_servos, i, 0.0f);
         servo_bank_t75_tick(&g_servos, TICK_MS);
@@ -581,13 +570,8 @@ void StartFlightTask(void *argument)
             }
         }
 
-        /* -- 9. Standby drift reset - rocket is static, kill accumulated drift.
-         * Runs after the log and telemetry blocks because STANDBY_RESET_INTERVAL
-         * is a whole multiple of both cadences: resetting first would hand every
-         * reset-tick row zeroed vel/pos and an identity attitude, erasing the one
-         * sample per period that records how much drift there was to discard.
-         * Safe here - flight_sm reads only az_mps2 in STANDBY, and the reset
-         * leaves acc_original untouched. */
+        /* -- 9. Standby drift reset (rocket static). Placed after logging:
+         * docs/design.md#standby-drift-reset-ordering */
         if (g_sm.state == FLIGHT_STATE_STANDBY &&
             loop_counter > 0 && loop_counter % STANDBY_RESET_INTERVAL == 0)
         {

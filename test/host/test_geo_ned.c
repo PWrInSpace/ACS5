@@ -1,6 +1,5 @@
-// Tests for the local North-East-Down conversion: scale factors, axis signs and
-// edge cases. Reference values are computed independently from the WGS-84
-// ellipsoid in double precision.
+// Local North-East-Down conversion: scale factors, axis signs and edge cases,
+// against WGS-84 reference values computed in double precision.
 #include "test_assert.h"
 #include <math.h>
 #include <stdint.h>
@@ -31,15 +30,13 @@ static void test_datum_set_stores_position_and_scales(void) {
     geo_ned_datum_set(&d, deg_1e7(52.1), deg_1e7(17.2), 83000);
     CHECK(d.valid);
     CHECK(d.lat_1e7 == deg_1e7(52.1) && d.lon_1e7 == deg_1e7(17.2) && d.height_mm == 83000);
-    // float scale factors, so a few centimetres per degree of tolerance
+    // float scale factors: a few centimetres per degree of tolerance
     CHECK(fabs(d.m_per_deg_lat - ref_m_per_deg_lat(52.1)) < 0.05);
     CHECK(fabs(d.m_per_deg_lon - ref_m_per_deg_lon(52.1)) < 0.05);
 }
 
 static void test_scale_changes_with_latitude(void) {
-    // A degree of longitude shrinks towards the poles, a degree of latitude
-    // grows slightly. Check against the reference at several latitudes,
-    // both hemispheres.
+    // Longitude degree shrinks and latitude degree grows towards the poles.
     const double lats[] = {0.0, 10.0, 52.0, 70.0, 89.0, -33.0, -80.0};
     for (size_t i = 0; i < sizeof lats / sizeof lats[0]; i++) {
         geo_ned_datum_t d;
@@ -97,9 +94,7 @@ static void test_known_distances_at_the_equator(void) {
 }
 
 static void test_matches_reference_over_flight_scale_distances(void) {
-    // A few km either way, several datums: the result is the integer coordinate
-    // difference times the scale, so it must agree with the double reference to
-    // well under a centimetre per kilometre.
+    // A few km from several datums: agrees with the double reference to < 1 cm/km.
     const double lats[] = {-45.0, 0.0, 38.0, 52.1};
     const double lons[] = {-120.0, -0.1, 17.2, 150.0};
     for (size_t i = 0; i < sizeof lats / sizeof lats[0]; i++) {
@@ -116,9 +111,7 @@ static void test_matches_reference_over_flight_scale_distances(void) {
 }
 
 static void test_difference_is_taken_in_integers(void) {
-    // Two positions 1 mm-scale apart near the pole of precision: a float
-    // latitude (about 7 digits) could not tell these apart, the integer
-    // difference can.
+    // 1e-7 degree apart: below float-latitude resolution, resolved by the integer difference.
     geo_ned_datum_t d;
     geo_ned_datum_set(&d, 519999999, 170000000, 0);
     float n[3];
@@ -127,9 +120,7 @@ static void test_difference_is_taken_in_integers(void) {
 }
 
 static void test_extreme_coordinates_do_not_overflow(void) {
-    // From the far side of the globe the difference is beyond 32 bits in
-    // longitude (3.6e9 units of 1e-7 degree, more than INT32_MAX); the 64-bit
-    // subtraction must not wrap. Nobody flies there; this guards the arithmetic.
+    // Antipodal difference exceeds INT32_MAX units of 1e-7 degree: no 32-bit wrap.
     float n[3];
     geo_ned_datum_t d;
 

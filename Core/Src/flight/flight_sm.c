@@ -1,4 +1,5 @@
 #include "flight/flight_sm.h"
+#include "config/airframe.h"
 #include "utils/control_rate.h"
 #include "utils/mathx.h"
 
@@ -14,18 +15,15 @@ flight_sm_config_t flight_sm_config_default(void)
         .apogee_vel_mps     = -1.0f,
         .apogee_alt_drop_m  = 7.5f,
         .recovery_vel_mps   = -5.0f,
-        /* Ticks, not baro samples: at 0.05 s per vz update this window spans
-         * one or two distinct values and filters far less than its duration
-         * suggests. */
+        /* Ticks, not baro samples: at 0.05 s per vz update this spans only one or two vz values. */
         .recovery_debounce  = (int)SEC_TO_TICKS(0.064f),
         .baro_vel_tau_s     = 0.34f,
         .baro_vel_min_span_s = 0.05f,
         .post_falling_timeout_ticks = SEC_TO_TICKS(240.0f),
-        /* Placeholders until the airframe's burnout-to-apogee time is known. */
-        .max_coast_ticks       = SEC_TO_TICKS(20.0f),
-        .launch_confirm_ticks  = SEC_TO_TICKS(1.0f),
-        .launch_confirm_baro_m = 10.0f,
-        .launch_confirm_imu_m  = 1.5f,
+        .max_coast_ticks       = SEC_TO_TICKS(AIRFRAME_MAX_COAST_S),
+        .launch_confirm_ticks  = SEC_TO_TICKS(AIRFRAME_LAUNCH_CONFIRM_S),
+        .launch_confirm_baro_m = AIRFRAME_LAUNCH_CONFIRM_BARO_M,
+        .launch_confirm_imu_m  = AIRFRAME_LAUNCH_CONFIRM_IMU_M,
     };
 }
 
@@ -50,22 +48,11 @@ const char *flight_state_name(flight_state_t s)
 }
 
 /* Baro-derived vertical speed; only meaningful on fresh baro ticks.
- *
- * Differencing altitude over a span S gives velocity noise sigma_h*sqrt(2)/S,
- * so the span - not the publish cadence - sets the SNR, and the low-pass only
- * recovers sqrt(S/tau) of what a short span throws away. The MS5611 at OSR 4096
- * resolves 1.2 Pa RMS, about 0.1 m, which over 0.05 s and tau 0.34 s leaves
- * roughly 1 m/s on vz - already the width of the -1.0 m/s apogee gate. Taking
- * the difference across every publish instead would scale that by
- * sqrt(0.05/dt) and drown the gate; holding tau responsible instead would need
- * tau near 2 s, which is slower than the altitude-drop term this gate is ANDed
- * with. So the span is held fixed and the publish rate is free to change. */
+ * Why the span is fixed, not the publish interval: docs/design.md#baro-velocity */
 static void update_baro_vel(flight_sm_t *sm, const flight_sm_input_t *in)
 {
-    /* baro_vel_z feeds the only exits from FREE_FLIGHT and FALLING, and the
-     * low-pass has no path back out of NaN: one bad sample would strand the
-     * state machine for the rest of the flight. Negated compares also reject
-     * a NaN dt, which "dt <= 0" would let through. */
+    /* The low-pass cannot recover from NaN, and it feeds the only exits from FREE_FLIGHT
+     * and FALLING. The negated compare also rejects a NaN dt, which "dt <= 0" would pass. */
     if (!in->baro_fresh || !(in->baro_dt_s > 0.0f)) return;
     if (!sm->baro_vel_seeded) {
         if (!isfinite(in->baro_alt_m)) return;
@@ -75,9 +62,8 @@ static void update_baro_vel(flight_sm_t *sm, const flight_sm_input_t *in)
         return;
     }
 
-    /* Accumulated before the sample is vetted: a rejected sample still consumed
-     * wall time, and charging it to the next difference is what keeps the
-     * divisor equal to the interval prev_baro_alt was actually measured over. */
+    /* Accumulated before the sample is vetted: a rejected sample still consumed time,
+     * and the divisor must equal the interval prev_baro_alt was measured over. */
     sm->baro_span_s += in->baro_dt_s;
     if (!isfinite(in->baro_alt_m)) return;
     if (sm->baro_span_s < sm->cfg.baro_vel_min_span_s) return;
@@ -143,9 +129,8 @@ bool flight_sm_step(flight_sm_t *sm, const flight_sm_input_t *in)
                     sm->peak_alt        = in->alt_m;
                     sm->prev_baro_alt   = in->baro_alt_m;
                     sm->baro_span_s     = 0.0f;
-                    /* A NaN here would poison every later difference, and the
-                     * filter has no path back out; leave it unseeded instead
-                     * and let update_baro_vel seed from the next good sample. */
+                    /* A NaN seed would poison every later difference; update_baro_vel
+                     * seeds from the next good sample instead. */
                     sm->baro_vel_seeded = isfinite(in->baro_alt_m);
                 }
             } else sm->burnout_count = 0;

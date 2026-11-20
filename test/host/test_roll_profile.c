@@ -1,6 +1,5 @@
-// Trapezoidal roll-angle profile: ramp at max_accel to max_rate, cruise,
-// brake to arrive at target with ~zero rate. Analytic duration for
-// 90 deg @ 105 deg/s, 210 deg/s^2: 2*0.5 + (1.571 - 2*0.458)/1.833 ~= 1.36 s.
+// Trapezoidal roll-angle profile. Analytic duration for 90 deg at 105 deg/s,
+// 210 deg/s^2: 2*0.5 + (1.571 - 2*0.458)/1.833 ~= 1.36 s.
 #include "test_assert.h"
 #include <math.h>
 #include <stdio.h>

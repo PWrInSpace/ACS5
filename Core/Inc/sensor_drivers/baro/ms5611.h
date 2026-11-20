@@ -1,28 +1,5 @@
-/*
- * MS5611 Barometric Pressure Sensor Driver
- *
- * MEAS Switzerland MS5611-01BA03, 24-bit delta-sigma ADC barometer.
- * Communicates over SPI (Mode 0 or 3, max 20 MHz).
- *
- * Features:
- * - Non-blocking state machine (driven by external tick)
- * - Factory PROM calibration read with CRC-4 verification (AN520)
- * - Full 2nd-order temperature compensation per datasheet
- * - Configurable oversampling ratio (256-4096)
- * - Output in SI units: Pa, degC
- * - Barometric altitude helper
- *
- * Typical usage:
- *   ms5611_t baro;
- *   ms5611_config_t cfg = ms5611_config_rocket_default();
- *   ms5611_init(&baro, &hspi2, BARO_CS_GPIO_Port, BARO_CS_Pin, &cfg);
- *
- *   // In FlightTask (~100 Hz tick):
- *   ms5611_update(&baro);
- *   if (ms5611_has_new_data(&baro)) {
- *       ms5611_sample_t s = ms5611_sample(&baro);
- *   }
- */
+/* MS5611-01BA03 barometer driver over SPI (mode 0/3, max 20 MHz): non-blocking
+ * state machine advanced by ms5611_update(), CRC-checked PROM, SI-unit output. */
 
 #pragma once
 
@@ -78,10 +55,8 @@ typedef struct
     uint8_t state;
     bool    initialized;
     bool    new_data;
-    /* Reference pressure for altitude_m. The flight task retargets this to the
-     * pad pressure during STANDBY, so altitude_m is metres above the launch
-     * site, not above the standard-pressure datum - the SD log's baro_alt
-     * column reads AGL. */
+    /* Reference pressure for altitude_m; the flight task sets it to the pad
+     * pressure in STANDBY, so altitude_m is AGL. */
     float   qnh_pa;
 
     ms5611_osr_t osr;

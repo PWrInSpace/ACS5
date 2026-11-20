@@ -1,8 +1,5 @@
-/*
- * SRT Servo T75 HV platform-independent math: angle->pulse mapping (trim,
- * direction, clamping) and slew-rate-limited stepping. Host-testable.
- * Datasheet: neutral 1500 us, 90 deg span 1000-2000 us => 11.111 us/deg.
- */
+/* SRT T75 HV angle->pulse mapping and slew stepping, HAL-free.
+ * Datasheet: neutral 1500 us, 90 deg over 1000-2000 us = 11.111 us/deg. */
 #pragma once
 
 #include <stdint.h>

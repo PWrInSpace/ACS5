@@ -5,21 +5,8 @@
 
 #include "flight/flight_sm.h"
 
-/* Decides when the roll controller may drive the canards.
- *
- * Burnout is the trigger, not altitude. The maneuver is only executable while
- * there is dynamic pressure to work with, which on this airframe means the first
- * seconds of a 7.3 s coast, so anything that delays arming comes straight out of
- * the window. FLIGHT_STATE_FREE_FLIGHT already requires launch detection and
- * burnout detection, each debounced, so it is a far stronger statement about not
- * being on the pad than any altitude threshold.
- *
- * Altitude survives only as a floor: without it a state machine fooled on the
- * ground could unlock and drive four servos against a locked mechanism.
- *
- * Arming is one-way per flight. Dropping back to disarmed clears the whole
- * controller state, which would discard a latched abort and capture a fresh
- * reference - another 90 deg from wherever the airframe then points. */
+/* Decides when the roll controller may drive the canards; arming is one-way per flight.
+ * Why burnout, not altitude, is the trigger: docs/design.md#arming-trigger */
 typedef enum
 {
     CTRL_ARM_PREARM = 0,

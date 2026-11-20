@@ -1,46 +1,55 @@
-# Test serw na stole (build bench)
+# Servo bench test (bench build)
 
-Cel: potwierdzić mapowanie gniazd J4 na płetwy, kierunki wychyleń i działanie blokady. Wyniki są wejściem do miksera regulatora 3-osiowego.
+Goal: confirm which J4 socket drives which fin, the deflection directions and the
+canard lock. The results feed the 3-axis controller's mixer.
 
-## Pierwsze uruchomienie płytki
+## First power-up of a board
 
-Zegar systemowy pochodzi z kwarcu HSE 50 MHz (Y1). Jeśli kwarc nie wystartuje, firmware zatrzymuje się w `Error_Handler` zaraz po włączeniu: brak enumeracji USB, brak komunikatów, LED-y nie migają. Wtedy sprawdzić montaż Y1 oraz C34/C35 (6 pF).
+The system clock comes from the 50 MHz HSE crystal (Y1). If the crystal does not
+start, the firmware stops in `Error_Handler` right after power-on: no USB
+enumeration, no messages, no LED activity. Check the Y1 assembly and C34/C35
+(6 pF).
 
-1. Flash buildu lotnego, USB do komputera.
-2. Port CDC pojawia się w systemie, a w terminalu `--- ACS5 Aggregator Task Starting ---`.
-3. Telemetria raportuje pętlę ~500 Hz (`[STANDBY] 500 Hz`).
+1. Flash the flight build, connect USB.
+2. The CDC port appears and the terminal shows `--- ACS5 Flight Task Starting ---`.
+3. Telemetry reports a ~500 Hz loop (`[STANDBY] 500 Hz`).
 
-## Przygotowanie
+## Setup
 
-1. Serwa SRT T75 w gniazdach J4 CH2–CH5, serwo blokady w CH6. CH1 nie jest podłączone do MCU.
-2. Zasilanie VIN dla serw; USB do komputera, terminal na porcie CDC.
-3. Build bench (README, sekcja „Servo bench build”), flash.
+1. SRT T75 servos in J4 CH2–CH5, the lock servo in CH6. CH1 has no MCU pin.
+2. VIN supply for the servos; USB to the computer, terminal on the CDC port.
+3. Bench build (README, "Servo bench build"), flash.
 
-## Procedura
+## Procedure
 
-1. Po starcie: blokada otwiera się na 3 s i zamyka; w terminalu `[OK] Servos armed (neutral), canards locked`, potem `[BENCH] Servo bench build - flight loop disabled`.
-2. Dla każdego gniazda CH2–CH5 terminal drukuje `[BENCH] J4 CHx +10 deg`, `-10 deg`, `+0 deg` co 1 s. W tym czasie rusza się wyłącznie serwo w gnieździe CHx. Zapisz w tabeli, która to płetwa na kadłubie i w którą stronę wychyla się krawędź spływu przy `+10`.
-3. `[BENCH] LOCK OPEN` → blokada otwarta; po 3 s `[BENCH] LOCK CLOSED` → zamknięta.
-4. Cykl powtarza się co 18 s.
+1. After start-up: the lock opens for 3 s and closes; the terminal shows
+   `[OK] Servos armed (neutral), canards locked`, then
+   `[BENCH] Servo bench build - flight loop disabled`.
+2. For each socket CH2–CH5 the terminal prints `[BENCH] J4 CHx +10 deg`, `-10 deg`,
+   `+0 deg`, one per second. Only the servo in CHx moves. Record which fin on the
+   airframe it is and which way the trailing edge moves at `+10`.
+3. `[BENCH] LOCK OPEN` → lock open; after 3 s `[BENCH] LOCK CLOSED` → closed.
+4. The cycle repeats every 18 s.
 
-## Build lotny
+## Flight build
 
-1. Flash buildu lotnego.
-2. Po starcie: sekwencja blokady (otwarta 3 s → zamknięta), canardy w neutrum, brak ruchu serw w STANDBY.
-3. LED_1 (PA8) miga w rytmie telemetrii; serwa nie drgają przy mruganiu.
+1. Flash the flight build.
+2. After start-up: lock sequence (open 3 s → closed), canards neutral, no servo
+   movement in STANDBY.
+3. LED_1 (PA8) blinks with the telemetry; the servos do not twitch with it.
 
-## Wyniki
+## Results
 
-Data: — Płytka: — Wykonał: —
+Date: — Board: — Tested by: —
 
-| Gniazdo J4 | Fizyczna płetwa (pozycja na kadłubie, widok od nosa) | Kierunek krawędzi spływu przy +10° | Neutrum [µs] |
+| J4 socket | Physical fin (position on the airframe, seen from the nose) | Trailing-edge direction at +10° | Neutral [µs] |
 |---|---|---|---|
 | CH2 (fin 0) | | | |
 | CH3 (fin 1) | | | |
 | CH4 (fin 2) | | | |
 | CH5 (fin 3) | | | |
 
-| Blokada (CH6) | Wynik |
+| Lock (CH6) | Result |
 |---|---|
-| 1050 µs | otwarta / zamknięta |
-| 1900 µs | otwarta / zamknięta |
+| 1050 µs | open / closed |
+| 1900 µs | open / closed |

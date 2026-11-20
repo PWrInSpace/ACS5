@@ -1,18 +1,4 @@
-/*
- * MMC5983MA Magnetometer Driver
- *
- * MEMSIC MMC5983MA, 18-bit tri-axis magnetometer over SPI.
- * Continuous-measurement mode; output in uT (sensor frame).
- *
- * Typical usage:
- *   mmc5983ma_t mag;
- *   mmc5983ma_config_t cfg = mmc5983ma_config_rocket_default();
- *   mmc5983ma_init(&mag, &hspi2, MAG_CS_GPIO_Port, MAG_CS_Pin);
- *   mmc5983ma_configure(&mag, &cfg);
- *
- *   mmc5983ma_sample_t s;
- *   if (mmc5983ma_read(&mag, &s)) { ... }
- */
+/* MEMSIC MMC5983MA 18-bit magnetometer driver over SPI, continuous mode, output in uT. */
 
 #pragma once
 

@@ -1,9 +1,4 @@
-/*
- * ACS5 - MAX-M10S HAL interface.
- *
- * This file only moves bytes: DMA setup, CFG-VALSET framing, ACK waiting and
- * the drain loop.
- */
+/* MAX-M10S HAL interface: DMA receive, CFG-VALSET framing, ACK waiting, frame drain. */
 
 #include "stm32h7xx_hal.h"
 
@@ -14,10 +9,9 @@
 
 #include "utils/attributes.h"
 
-/* ------------------------------------------------------------------- CFG-VALSET
- *
- * payload = version(1) + layers(1) + reserved(2), then one or more
- *           key(4) + value(1|2|4) pairs. */
+/* ------------------------------------------------------------------- CFG-VALSET */
+
+/* payload = version(1) layers(1) reserved(2), then key(4) + value(1|2|4) pairs. */
 #define MAX_M10S_CFG_HDR_LEN     4u
 #define MAX_M10S_CFG_VAL_MAX_LEN 4u
 #define MAX_M10S_CFG_ITEM_MAX_LEN (4u + MAX_M10S_CFG_VAL_MAX_LEN)
@@ -62,9 +56,8 @@ typedef struct
 /* DMA RX ring size. */
 #define MAX_M10S_DMA_BUF_LEN    512u
 
-/* UART speed used after configuration, and the module's power-on speed. The
- * configuration lives in the module's RAM, so after an MCU-only reset the module
- * is still at the flight speed; after a power cycle it is at the boot speed. */
+/* The configuration lives in module RAM: after an MCU-only reset the module is
+ * still at the flight speed, after a power cycle at its boot speed. */
 #define MAX_M10S_BAUD_FLIGHT    115200u
 
 /* Power-on speeds to probe: MAX-M10S boots at 9600 (integration manual 2.1.4),
@@ -92,10 +85,8 @@ static const uint32_t s_boot_bauds[] = {9600u, 38400u};
  * needs a non-cacheable MPU region over .dma_buf. */
 static uint8_t s_dma_buf[MAX_M10S_DMA_BUF_LEN] ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
 
-/* Index the DMA will write next. NDTR counts down from the buffer length and
- * can read as 0 (or the full length right after a wrap); the modulo folds a
- * full-length result back to 0 so the result is always a valid ring index and
- * a read index can actually equal it. */
+/* Index the DMA will write next. NDTR can read 0 or the full length at a wrap;
+ * the modulo folds both onto one valid ring index. */
 static uint16_t dma_write_pos(const max_m10s_driver_t *drv)
 {
     const uint16_t ndtr = (uint16_t)__HAL_DMA_GET_COUNTER(drv->huart->hdmarx);
@@ -105,10 +96,8 @@ static uint16_t dma_write_pos(const max_m10s_driver_t *drv)
 /* Starts circular receive-to-idle DMA into the ring buffer. */
 static bool start_rx_dma(const max_m10s_driver_t *drv)
 {
-    /* Bytes that arrived while nothing was receiving leave an overrun pending.
-     * The HAL enables the error interrupt before the DMA request, so that
-     * pending error aborts the reception but leaves the stream BUSY, and every
-     * later start fails. Stop the stream and clear the flags first. */
+    /* An overrun pending from bytes received while idle aborts the HAL start but
+     * leaves the stream BUSY, failing every later start: abort and clear first. */
     if (drv->huart->hdmarx->State != HAL_DMA_STATE_READY)
         (void)HAL_DMA_Abort(drv->huart->hdmarx);
     __HAL_UART_SEND_REQ(drv->huart, UART_RXDATA_FLUSH_REQUEST);
@@ -124,11 +113,8 @@ static bool start_rx_dma(const max_m10s_driver_t *drv)
     return true;
 }
 
-/* Drops cached copies of the ring bytes in [from, to), which may wrap.*/
-/* Feeds ring bytes from *read_pos up to write_pos to the parser. Stops and
- * returns true at the first complete frame, with *read_pos just past it;
- * returns false once write_pos is reached.
- */
+/* Feed ring bytes up to write_pos to the parser; true at the first complete
+ * frame (read_pos just past it), false once write_pos is reached. */
 static bool ring_feed(ubx_parser_t *parser, uint16_t *read_pos, uint16_t write_pos)
 {
     while (*read_pos != write_pos)
@@ -150,11 +136,10 @@ static void put_le(uint8_t *dst, uint32_t value, uint8_t size)
         dst[i] = (uint8_t)((value >> (8u * i)) & 0xFFu);
 }
 
-/* -------------------------------------------------------------- CFG-VALSET ACK
- *
- * Sends one CFG-VALSET carrying `count` key/value pairs and waits for a single
- * ACK-ACK or ACK-NAK for the whole message, retransmitting up to `attempts`
- * times. */
+/* -------------------------------------------------------------- CFG-VALSET ACK */
+
+/* Send one CFG-VALSET with `count` pairs and wait for its single ACK/NAK,
+ * transmitting up to `attempts` times. */
 static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
                                          const cfg_item_t *items, size_t count,
                                          uint8_t attempts)
@@ -283,9 +268,8 @@ static bool set_host_baud(const max_m10s_driver_t *drv, uint32_t baud)
     return start_rx_dma(drv);
 }
 
-/* Brings the link up at MAX_M10S_BAUD_FLIGHT whatever speed the module is at:
- * the flight speed answers directly; otherwise, for each boot speed, send the
- * baud change there, let the module switch, and require an ACK at flight speed. */
+/* Bring the link up at MAX_M10S_BAUD_FLIGHT from whatever speed the module is at:
+ * try flight speed, else send the baud change at each boot speed and require an ACK. */
 static max_m10s_status_t negotiate_baud(const max_m10s_driver_t *drv)
 {
     max_m10s_status_t st;
@@ -341,9 +325,8 @@ max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
 
 bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame)
 {
-    /* A receive error stopped the DMA: restart it, and drop what was in flight
-     * (read pointer to the new write position, parser back to hunting). If the
-     * restart itself fails, stay pending and try again on the next call. */
+    /* A receive error stopped the DMA: restart it and drop what was in flight;
+     * a failed restart stays pending for the next call. */
     if (drv->rx_restart_pending)
     {
         if (!start_rx_dma(drv))

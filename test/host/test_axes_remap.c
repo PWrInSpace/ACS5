@@ -84,9 +84,8 @@ static void test_board_remaps_are_rotations(void)
     CHECK(axes_remap_is_rotation(&mag));
 }
 
-/* Both packages sit on the board face that looks at the nose, and their
- * datasheet Z axes run opposite ways there, so exactly one of the two remaps
- * has to invert Z. */
+/* Both packages face the nose with opposite datasheet Z, so exactly one remap
+ * inverts Z. */
 static void test_board_remaps_disagree_on_z(void)
 {
     axes_remap_t imu = BOARD_IMU_REMAP;

@@ -103,9 +103,8 @@ void attitude_reset(attitude_t *est)
     /* Preserve quaternion, calib, gyro bias and mag reference (soft standby reset). */
 }
 
-/* True once the pad has been continuously still for still_time_s. Gravity
- * direction catches slow tilts below any rate gate; the rate gate catches
- * rotation about the vertical, which gravity cannot see. */
+/* True after still_time_s of continuous stillness. Gravity direction catches slow tilts;
+ * the rate gate catches rotation about the vertical, which gravity cannot see. */
 static bool pad_is_still(attitude_t *est, const float gyro[3], const float acc[3])
 {
     const attitude_config_t *c = &est->cfg;
@@ -219,16 +218,8 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
         calib_push(est, avg);
 
     if (!est->q_valid) {
-        /* Seeding reads the accelerometer as gravity, so it is gated with the
-         * corrections: an IMU stall that clears mid-coast would otherwise
-         * rebuild the attitude out of the drag vector and then call it valid.
-         *
-         * That leaves nothing to rebuild from in flight, so validity instead
-         * comes back from the quaternion already held. It was never corrupted -
-         * a stall stops it being advanced, it does not corrupt it - and the cost
-         * is the drift accumulated over the stall. The alternative is an
-         * unrecoverable loss of attitude for the rest of the flight, which the
-         * roll controller has no answer to at all. */
+        /* In flight, validity returns on the held quaternion, not a gravity reseed:
+         * docs/design.md#attitude-recovery-after-an-imu-stall */
         if (in->corrections_inhibited) {
             if (quat_finite(est->q))
                 est->q_valid = true;

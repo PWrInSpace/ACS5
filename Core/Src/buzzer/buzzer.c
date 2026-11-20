@@ -1,24 +1,4 @@
-/**
- * @file    buzzer.c
- * @brief   PWM buzzer driver - CMT-8504-100-SMT-TR
- *
- * Circuit recap (from schematic):
- *   PE5 (TIM15_CH1) --[R48 1k]--> IRLML6344 gate
- *                                  IRLML6344 drain --> Buzzer(-)
- *                                  Buzzer(+) --> 3V3
- *                                  D20 flyback across buzzer
- *                   --[R49 33k]--> GND  (ensures gate low when pin floats)
- *
- * Timer maths:
- *   APB2 Timer clock = 150 MHz
- *   ARR  = (150,000,000 / freq_hz) - 1
- *   CCR1 = ARR / 2          -> 50 % duty cycle (max magnetic drive)
- *
- * Inter-note gap:
- *   A 10 ms silent gap is inserted between every note during melody playback.
- *   This articulates notes that share the same pitch (e.g. two consecutive D4s)
- *   and prevents the buzzer from ringing continuously through ties.
- */
+/* PWM buzzer driver (CMT-8504). */
 
 #include "buzzer/buzzer.h"
 #include "tim.h"            /* CubeMX-generated TIM15 handle (htim15) */
@@ -38,14 +18,13 @@ static void _apply_freq(uint32_t freq_hz)
     uint32_t psc  = 0;
     uint32_t arr  = (BUZZER_TIMER_CLOCK_HZ / freq_hz) - 1UL;
 
-    /* If ARR overflows 16-bit, introduce prescaler.
-     * Find smallest PSC such that arr fits in uint16.                */
+    /* Smallest prescaler that fits ARR in 16 bits. */
     while (arr > 65535UL) {
         psc++;
         arr = (BUZZER_TIMER_CLOCK_HZ / ((psc + 1UL) * freq_hz)) - 1UL;
     }
 
-    uint32_t ccr1 = arr / 2UL;
+    uint32_t ccr1 = arr / 2UL;   /* 50 % duty: maximum magnetic drive */
 
     __HAL_TIM_SET_PRESCALER(_htim, psc);
     __HAL_TIM_SET_AUTORELOAD(_htim, arr);
@@ -78,7 +57,7 @@ void Buzzer_Off(void)
 
 /* -- Melody playback --------------------------------------------------------- */
 
-#define NOTE_GAP_MS   10u   /* silent gap between notes for articulation */
+#define NOTE_GAP_MS   10u   /* separates repeated same-pitch notes */
 
 void Buzzer_PlayMelody(const BuzzerNote_t *melody, uint16_t len)
 {
@@ -89,7 +68,7 @@ void Buzzer_PlayMelody(const BuzzerNote_t *melody, uint16_t len)
         uint32_t freq = melody[i].freq_hz;
         uint32_t dur  = melody[i].duration_ms;
 
-        /* Clamp duration so the gap always fits */
+        /* The gap is taken out of the note's duration. */
         uint32_t tone_dur = (dur > NOTE_GAP_MS) ? (dur - NOTE_GAP_MS) : dur;
 
         if (freq == 0)

@@ -41,18 +41,8 @@ static void test_gravity_init_level(void)
     CHECK(est.q.w > 0.99f);
 }
 
-/* Powered flight and coast are the phases where the accelerometer is not
- * measuring gravity. On this airframe the coast reads a few tenths of a g of
- * drag, pointing aft rather than down; levelling against it drives the estimate
- * toward inverted, and the roll maneuver reads its angle off that same
- * quaternion. The magnitude window happens to exclude drag today, but that
- * margin is a number that moves with mass and drag coefficient, and it is the
- * only thing standing between a correct estimate and a tumbling one. The phase
- * has to decide, not the magnitude.
- *
- * Seeding is gated with the corrections for the same reason: a stalled IMU that
- * clears mid-coast would otherwise re-seed the attitude from the drag vector
- * and then report it valid. */
+/* With corrections inhibited (flight), a gravity-magnitude accel is ignored.
+ * Why the phase gates corrections, not the magnitude: docs/design.md#accel-corrections-are-gated-by-flight-phase */
 static void test_inhibited_corrections_leave_the_estimate_to_the_gyro(void)
 {
     attitude_config_t cfg = attitude_config_default();
@@ -68,9 +58,7 @@ static void test_inhibited_corrections_leave_the_estimate_to_the_gyro(void)
     float before[3];
     attitude_euler(&est, before);
 
-    /* A full 1 g tilted 30 deg off body Z: inside the trust window, so only the
-     * phase gate can stop it being taken for gravity. Gyro stays at zero, so
-     * anything that moves the estimate came from the accelerometer. */
+    /* 1 g tilted 30 deg off body Z, inside the magnitude window; zero gyro. */
     in.accel_mps2[0]        = GRAVITY * 0.5f;
     in.accel_mps2[2]        = GRAVITY * 0.866f;
     in.corrections_inhibited = true;
@@ -167,13 +155,7 @@ static void test_imu_dropout_drops_q_valid(void)
     CHECK(!est.q_valid);
 }
 
-/* An IMU stall long enough to invalidate the attitude must not be permanent in
- * flight. Re-validation runs through gravity seeding, and seeding is gated off
- * exactly when the accelerometer is measuring drag rather than gravity - so
- * without a separate path a single stall costs the attitude for the rest of the
- * coast, and the roll controller spends it in abort with nothing to steer by.
- * The quaternion was never corrupted, only left un-advanced, so validity comes
- * back from the propagated attitude, drift and all. */
+/* After an in-flight IMU stall, validity returns on the held quaternion, not a re-seed. */
 static void test_imu_stall_in_flight_recovers_validity(void)
 {
     attitude_config_t cfg = attitude_config_default();
@@ -250,9 +232,8 @@ static attitude_config_t bench_config(void)
     return cfg;
 }
 
-/* Angle between estimate and truth after holding a constant body rate. bias_z is
- * added to the reported rate only, so the estimate drifts off a truth the accel
- * and mag still describe honestly. */
+/* Angle between estimate and truth after holding a constant body rate; bias_z
+ * is added to the reported gyro rate only. */
 static float rotation_error_deg(const float w_body[3], float secs, bool mag_on,
                                 float bias_z)
 {
@@ -294,17 +275,14 @@ static void test_tilt_about_y_tracks_truth(void)
     CHECK(rotation_error_deg(w, 1.0f, false, 0.0f) < 2.0f);
 }
 
-/* Rates on all three axes at once. A remap that levels correctly but is not a
- * rotation only shows up here, where the accelerometer and the gyro have to
- * agree about a motion that is not confined to one axis. */
+/* Simultaneous rates on all three axes track truth. */
 static void test_combined_rotation_tracks_truth(void)
 {
     float w[3] = {25.0f / RAD2DEG, -18.0f / RAD2DEG, 40.0f / RAD2DEG};
     CHECK(rotation_error_deg(w, 1.5f, false, 0.0f) < 3.0f);
 }
 
-/* The airframe really turns while the reported rate carries a bias, so the mag
- * term is non-zero throughout and its sign decides whether the error closes. */
+/* Real yaw rotation plus a gyro bias: the mag correction closes the error. */
 static void test_mag_does_not_fight_real_rotation(void)
 {
     float w[3] = {0.0f, 0.0f, 20.0f / RAD2DEG};
@@ -340,8 +318,7 @@ static void test_mag_bounds_heading_drift(void)
     CHECK(drift[1] < drift[0]);
 }
 
-/* Corrections inhibited, as in flight: the gyro alone carries the attitude and
- * the twist the roll controller steers by has to survive off-axis motion. */
+/* Gyro-only (flight) propagation keeps roll twist accurate under coning. */
 static void test_coning_does_not_leak_into_roll(void)
 {
     attitude_config_t cfg = bench_config();

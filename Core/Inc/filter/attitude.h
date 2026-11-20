@@ -38,10 +38,8 @@ typedef struct
     bool  baro_vel_valid;
     bool  imu_valid;        /* false = accel/gyro are a held stale sample */
     bool  mag_valid;
-    /* Set while the accelerometer is not measuring gravity - powered flight and
-     * coast. Inhibits the accel and mag corrections and the gravity seeding,
-     * leaving the quaternion to the gyro. Phrased as an inhibit so a zeroed
-     * input struct keeps the corrections on, which is what standby needs. */
+    /* Accelerometer not measuring gravity (boost, coast): no accel/mag correction or gravity
+     * seeding. Phrased as an inhibit so a zeroed input struct keeps standby behaviour. */
     bool  corrections_inhibited;
     bool  collecting_calib; /* STANDBY and calib not finished */
     bool  zupt_active;      /* STANDBY - clamp XY vel/pos, estimate accel bias */
@@ -103,7 +101,5 @@ void attitude_update(attitude_t *est, const attitude_input_t *in);
 /* Soft standby reset: clears kinematics, accel bias and ring; keeps quat, calib and gyro bias. */
 void attitude_reset(attitude_t *est);
 
-/* ZYX Euler angles [rad] of the current attitude; out[2] is roll about body Z.
- * Nothing in the control path consumes these - they exist for the log, so call
- * this at the log rate rather than every tick. */
+/* ZYX Euler angles [rad] of the current attitude, for logging; out[2] is roll about body Z. */
 void attitude_euler(const attitude_t *est, float out[3]);

@@ -1,13 +1,5 @@
-// 1-DOF roll simulator linking the PRODUCTION roll_ctrl.c - the controller
-// that flies is the controller under test.
-//
-//   I_xx * p_dot = qbar*S*d * (C_ld*delta + C_lp * p*d/(2V))
-//
-// Includes the effects that actually bound the achievable gains: first-order
-// servo lag + slew, gyro noise, decaying post-burnout airspeed.
-//
-// Success criteria: overshoot < 5 deg, |hold error| < 2 deg,
-// rotate+settle < 3 s nominal.
+// 1-DOF roll simulator of the coast phase, linked against the production roll_ctrl.c.
+//   I_xx * p_dot = qbar*S*d * (C_ld*(delta + trim) + C_lp * p*d/(2V))
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -18,27 +10,20 @@
 #include "control/roll_ctrl.h"
 #include "utils/mathx.h"
 
-/* Integrate the plant on the exact step the controller runs at: gains tuned
- * against this sim describe the real vehicle only if the plant and the
- * controller share a timestep. */
+/* Plant integrates on the controller's own timestep. */
 #define DT   CONTROL_DT_S
 
-/* Powered flight ends 3.04 s in at 148 m and 77.6 m/s; apogee is at 10.32 s.
- * Past that the canards have nothing to work with, so the run ends there. */
+/* Burnout (3.04 s) to apogee (10.32 s) of the previous airframe's trajectory. */
 #define COAST_S 7.28f
 
-/* Dynamic pressure crosses the controller's floor at about 6 s, and the
- * maneuver is done by 3 s. The hold criterion is measured between the two. */
+/* Hold window: after the maneuver completes, before qbar falls below the floor. */
 #define HOLD_WINDOW_START_S 4.0f
 #define HOLD_WINDOW_END_S   5.5f
 
 typedef struct
 {
-    /* Joust 1 / K353, extracted from joust1_prot3.ork by the OpenRocket driver.
-     * C_ld and C_lp come from Barrowman, which models each fin set in isolation:
-     * the canard wake over the aft fins opposes the commanded roll and is in
-     * neither number. Treat C_ld as an upper bound until flight data says
-     * otherwise, and keep the +-50% Monte Carlo band as a floor, not a comfort. */
+    /* Previous airframe (Joust 1, K353 motor). C_ld is an upper bound:
+     * docs/design.md#roll-simulator-plant-model */
     float I_xx;            /* roll inertia at burnout, kg*m^2   */
     float C_ld;            /* canard roll moment coeff, 1/rad   */
     float C_lp;            /* roll damping coeff (<0)           */
@@ -48,14 +33,11 @@ typedef struct
     float v0;              /* airspeed at burnout, m/s          */
     float k_drag;          /* dV/dt = -(g + k_drag*V^2)         */
     float servo_tau_s;     /* servo first-order lag             */
-    float servo_slew_rads; /* T75 @ 6 V: 375 deg/s horn
-                              (assumes 1:1 linkage until bench measures it) */
+    float servo_slew_rads; /* T75 @ 6 V: 375 deg/s horn, 1:1 linkage */
     float gyro_noise_rads; /* 1-sigma white noise               */
     float p0;              /* roll rate at maneuver start       */
-    /* Standing roll moment from fin misalignment, as the equivalent canard
-     * deflection needed to cancel it. This is what ki_rate exists to reject and
-     * what the DAMP->ROTATE gate fails on, so a plant without it cannot qualify
-     * either. A quarter degree of aft-fin misalignment is about 2 deg here. */
+    /* Fin-misalignment roll moment as the canard deflection that cancels it;
+     * 0.25 deg of aft-fin misalignment is about 2 deg here. */
     float trim_deg;
 } sim_params_t;
 
@@ -126,17 +108,13 @@ static sim_result_t simulate(const sim_params_t *pp, const roll_ctrl_config_t *c
         if (rc.phase == ROLL_CTRL_HOLD)  res.completed = 1;
         if (rc.phase == ROLL_CTRL_ABORT) res.aborted   = 1;
 
-        /* Servo: the electronics slew-limit an internal setpoint (delta_lim)
-         * and the horn tracks it with first-order lag. delta_lim must persist
-         * across ticks; slewing from delta_act instead compounds the rate
-         * limit with the lag and caps actuator travel at slew*DT/(tau+DT). */
+        /* Servo slews an internal setpoint, horn lags it; slewing from delta_act
+         * instead would cap travel at slew*DT/(tau+DT) per tick. */
         float step = pp->servo_slew_rads * DT;
         delta_lim += clampf(delta_cmd - delta_lim, -step, step);
         delta_act += (delta_lim - delta_act) * (DT / (pp->servo_tau_s + DT));
 
-        /* plant */
-        /* The trim enters where it physically acts: as a moment on the
-         * airframe, present whatever the canards are doing. */
+        /* plant; trim acts as a moment regardless of canard state */
         float m_ctrl = qbar * pp->S * pp->d * pp->C_ld
                             * (delta_act + pp->trim_deg / RAD2DEG);
         float m_damp = (V > 1.0f)
@@ -145,11 +123,7 @@ static sim_result_t simulate(const sim_params_t *pp, const roll_ctrl_config_t *c
         p     += (m_ctrl + m_damp) / pp->I_xx * DT;
         theta += p * DT;
 
-        /* Coast deceleration: gravity plus quadratic drag, fitted to the
-         * OpenRocket trajectory. Airspeed sets qbar, and qbar sets the plant
-         * gain, which falls by more than an order of magnitude between burnout
-         * and apogee - a fixed-gain controller is correct at one instant of
-         * this run and wrong at every other. */
+        /* Coast deceleration: gravity plus quadratic drag fitted to the trajectory. */
         V -= (GRAVITY + pp->k_drag * V * V) * DT;
         if (V < 1.0f) V = 1.0f;
 
@@ -160,10 +134,6 @@ static sim_result_t simulate(const sim_params_t *pp, const roll_ctrl_config_t *c
             if (res.t_complete_s < 0.0f &&
                 fabsf(rel - 90.0f) < 2.0f && fabsf(p) * RAD2DEG < 10.0f)
                 res.t_complete_s = t - rotate_entry_t;
-            /* Measured while the canards still have authority. Past the qbar
-             * floor the command is zero and the airframe simply coasts at
-             * whatever angle it reached, so a window at the end of the run
-             * would report the frozen angle and call it a hold. */
             if (t > HOLD_WINDOW_START_S && t < HOLD_WINDOW_END_S) {
                 float e = fabsf(90.0f - rel);
                 if (e > res.hold_err_deg) res.hold_err_deg = e;
@@ -180,11 +150,7 @@ static sim_result_t simulate(const sim_params_t *pp, const roll_ctrl_config_t *c
     return res;
 }
 
-/* scenario = named parameter perturbation.
- * Baro dropout is NOT a sim scenario on purpose: roll_ctrl has no baro
- * input - a dead baro drops the altitude arming gate in the aggregator,
- * which is covered by test_disable_returns_to_idle_neutral in
- * test_roll_ctrl.c. */
+/* Named parameter perturbation of the default plant. */
 static sim_params_t scenario(const char *name)
 {
     sim_params_t p = sim_params_default();

@@ -1,9 +1,4 @@
-/*
- * IIM-42653 IMU Driver
- *
- * SPI transactions go through spi_dev; this file owns only the register map.
- * Timing: vTaskDelay for ms sleeps, DWT busy-wait for us sleeps.
- */
+/* IIM-42653 IMU driver: register map and sample conversion; SPI goes through spi_dev. */
 
 #include "sensor_drivers/imu/iim42653.h"
 
@@ -50,13 +45,8 @@ static bool    bypass_fifo(iim42653_t *self);
 static bool    iim42653_aaf_bw_is_enabled(const iim42653_aaf_bw_t *aaf);
 
 /* -------------------------------------------------------------------------
- * Write-or-fail macros
- *
- * IMU_TRY:       report_error + return false on failure.
- * IMU_TRY_BANK:  same, but selects bank 0 before returning. Use it for every
- *                failure path opened while a non-zero bank is selected; the
- *                rest of the driver assumes bank 0 on entry.
- * Both reference `self`. Undef'd at end of file.
+ * Write-or-fail macros: count the error and return false. IMU_TRY_BANK also
+ * restores bank 0, which the rest of the driver assumes on entry.
  * ------------------------------------------------------------------------- */
 
 #define IMU_TRY(expr)                    \
@@ -133,15 +123,8 @@ iim42653_config_t iim42653_config_rocket_default(void)
         .accel_odr          = IIM42653_ACCEL_ODR_HZ_1000,
         .gyro_filter_order  = IIM42653_FILTER_ORDER_SECOND,
         .accel_filter_order = IIM42653_FILTER_ORDER_SECOND,
-        /* The loop samples these registers at 500 Hz, so anything above 250 Hz
-         * folds back. ODR/4 puts the 3 dB corner at 230.7 Hz, right at Nyquist;
-         * ODR/8 moves it to 117.5 Hz and cuts noise bandwidth 223.7 -> 122.7 Hz
-         * (datasheet 2nd-order filter table at ODR 1 kHz).
-         *
-         * The corresponding group delay is 2.1 -> 3.2 ms, so this buys the
-         * anti-aliasing and the quieter kd_rate term at the price of 1.1 ms of
-         * extra phase lag in the roll loop, on top of the 2 ms sample-and-hold.
-         * Any damper retune has to budget for it. */
+        /* ODR/8 rather than ODR/4: anti-aliasing for the 500 Hz loop at +1.1 ms
+         * group delay. Why: docs/design.md#imu-ui-filter-bandwidth */
         .gyro_filter_bw     = IIM42653_FILTER_BW_ODR_DIV_8,
         .accel_filter_bw    = IIM42653_FILTER_BW_ODR_DIV_8,
         .temp_filter_bw     = IIM42653_TEMP_FILTER_BW_HZ_40,

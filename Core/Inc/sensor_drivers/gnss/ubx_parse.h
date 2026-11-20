@@ -1,14 +1,5 @@
-/*
- * ACS5 - u-blox UBX protocol, platform-independent layer.
- *
- * Frame state machine, Fletcher-8 checksum, UBX-NAV-PVT decode and frame
- * construction for the configuration messages.
- *
- * Pointer arguments must not be NULL. Callers pass static or stack objects, so
- * this is checked with assert() rather than at run time; data-dependent
- * problems (short payload, buffer too small, invalid datum) are reported through
- * the return value instead.
- */
+/* Platform-independent u-blox UBX layer: framing, checksum, NAV-PVT decode, frame build.
+ * NULL pointers are asserted; data-dependent problems are reported by return value. */
 #pragma once
 
 #include <stdbool.h>
@@ -86,9 +77,7 @@ void ubx_parser_init(ubx_parser_t *p);
  * ubx_parser_init() it keeps the health counters (and counts a resync). */
 void ubx_parser_resync(ubx_parser_t *p);
 
-/* Feeds one received byte. Returns true exactly when a complete frame with a
- * valid checksum is available.
- */
+/* Feed one byte; true exactly when a complete, checksum-valid frame is available. */
 bool ubx_parse_byte(ubx_parser_t *p, uint8_t b);
 
 /* Writes a complete frame into out (sync through checksum) and returns its
@@ -151,12 +140,9 @@ typedef struct
 
 bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out);
 
-/* True if the solution carries a usable position: the receiver flags it valid
- * (fix_ok), it is a 3D fix or GNSS + dead reckoning, and invalidLlh is clear. 2D,
- * dead reckoning alone and time-only fixes do not qualify. */
+/* True for fix_ok with a 3D or GNSS + dead-reckoning fix and invalidLlh clear. */
 bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt);
 
-/* True if the frame just completed in *p is an ACK-ACK or ACK-NAK answering the
- * message (cls, id). On true, *acked is true for an ACK and false for a NAK.
- * Call right after ubx_parse_byte() returns true. */
+/* After ubx_parse_byte() returns true: is the frame an ACK/NAK for (cls, id)?
+ * *acked tells ACK from NAK. */
 bool ubx_is_ack_for(const ubx_parser_t *p, uint8_t cls, uint8_t id, bool *acked);

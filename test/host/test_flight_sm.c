@@ -8,11 +8,8 @@
 #include "utils/control_rate.h"
 #include "utils/mathx.h"
 
-/* Published baro intervals the driver actually produces: the ~16.7 Hz cadence
- * the thresholds were first set against, and the ~94 Hz one a 10 ms poll gives
- * (one publish per poll bar one cycle in MS5611_TEMP_EVERY_N). The profile is
- * expressed in seconds and metres per second so both run the same flight, and
- * only the number of samples it is sliced into differs. */
+/* Baro publish intervals the driver can produce: ~16.7 Hz and ~94 Hz (10 ms poll,
+ * minus one temperature cycle in MS5611_TEMP_EVERY_N). */
 #define BARO_DT_SLOW 0.06f
 #define BARO_DT_FAST 0.0106f
 
@@ -118,9 +115,7 @@ static void test_nan_baro_sample_is_ignored(float dt)
     CHECK(sm.state == FLIGHT_STATE_FALLING);
 }
 
-/* The velocity estimate is a difference over a held-open span, so its noise is
- * set by baro_vel_min_span_s and not by how finely the publishes are sliced.
- * A profile flown at both cadences must reach the same speed. */
+/* Baro velocity is independent of the publish cadence. */
 static void test_vel_is_cadence_independent(void)
 {
     flight_sm_config_t cfg = flight_sm_config_default();

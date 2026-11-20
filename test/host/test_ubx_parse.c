@@ -113,8 +113,7 @@ static void test_parse_same_result_for_any_chunking(void) {
     uint8_t pl[92], f[100];
     for (int i = 0; i < 92; i++) pl[i] = (uint8_t)(i * 7);
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
-    // The parser has no notion of chunks, but the driver feeds it in bursts of
-    // varying size, so check that explicitly.
+    // The driver feeds the parser in bursts of varying size.
     for (uint16_t chunk = 1; chunk <= n; chunk++) {
         ubx_parser_t p;
         ubx_parser_init(&p);
@@ -188,7 +187,7 @@ static void put_u32(uint8_t *p, uint32_t v) {
 static void put_i32(uint8_t *p, int32_t v) { put_u32(p, (uint32_t)v); }
 
 // A payload with every field set to a distinct, known value (offsets from the
-// u-blox M10 interface description, written out here on purpose).
+// u-blox M10 interface description).
 static void make_pvt(uint8_t pl[92], uint8_t fix_type, uint8_t flags) {
     memset(pl, 0, 92);
     put_u32(pl + 0, 123456789u);           // iTOW, ms

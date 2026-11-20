@@ -9,8 +9,7 @@
 #define ACCEL_TRUST_MIN (0.7f * GRAVITY)
 #define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
-/* Mahony AHRS attitude backend. Swap for a Kalman (or other) backend later
- * behind the same filter/attitude.h facade. */
+/* Mahony AHRS attitude backend behind the filter/attitude.h facade. */
 
 typedef struct
 {
@@ -33,8 +32,6 @@ void mahony_update(mahony_t *m,
                    const float mag_ut[3],
                    bool mag_valid,
                    bool calib_done,
-                   /* Powered flight and coast: the accelerometer measures drag,
-                    * not gravity. Suppresses both feedback corrections and
-                    * leaves the quaternion to the gyro. */
+                   /* boost and coast: suppresses both corrections, gyro only */
                    bool corrections_inhibited,
                    float dt);

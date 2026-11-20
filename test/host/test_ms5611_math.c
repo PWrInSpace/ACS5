@@ -16,8 +16,7 @@ static void test_datasheet_golden(void) {
     CHECK_NEAR(p, 100009.0f, 1.0f);    // 100009 Pa
 }
 
-// 95460 Pa is roughly the pad pressure at a 500 m ASL site; the point is only
-// that it is not the 101325 Pa standard datum.
+// Roughly the pad pressure at a 500 m ASL site, away from the 101325 Pa standard.
 #define PAD_QNH_PA 95460.0f
 
 static void test_altitude_self_consistency(void) {
@@ -38,9 +37,8 @@ static void test_altitude_rises_as_pressure_falls(void) {
 }
 
 static void test_pad_datum_differs_from_datum_delta(void) {
-    // Setting QNH to the pad pressure is NOT the same as subtracting two
-    // standard-datum altitudes: h is not linear in the reference. The two
-    // differ by exactly (pad/101325)^0.190284.
+    // h is not linear in the reference: QNH = pad differs from subtracting two
+    // standard-datum altitudes by exactly (pad/101325)^0.190284.
     const float factor = powf(PAD_QNH_PA / 101325.0f, 0.190284f);
     for (float p = PAD_QNH_PA - 1000.0f; p > PAD_QNH_PA - 12000.0f; p -= 1000.0f) {
         float agl_new = ms5611_pressure_to_altitude(p, PAD_QNH_PA);

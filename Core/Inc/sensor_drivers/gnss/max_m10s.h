@@ -1,16 +1,4 @@
-/*
- * ACS5 - MAX-M10S HAL interface.
- *
- * This header is the contract between max_m10s.c and the FreeRTOS GNSS task
- * (gnss_task.c). It owns:
- *
- *   - the UART handle used by the STM32 HAL layer;
- *   - the driver state struct (max_m10s_driver_t), allocated statically in
- *     gnss_task.c so no heap is needed;
- *   - the public access and status codes used to configure, drain, and monitor
- *     the MAX-M10S.
- *
- */
+/* MAX-M10S driver interface used by the GNSS task: configure, drain, monitor. */
 #pragma once
 
 #include <stdbool.h>
@@ -43,9 +31,8 @@ typedef struct
     /* Ring read pointer, updated by max_m10s_drain(). */
     uint16_t      read_pos;
 
-    /* Sticky counts of receive errors that aborted the DMA: overruns, and
-     * any other UART error (noise, framing, parity). Written from the UART
-     * error callback. */
+    /* Receive errors that aborted the DMA (overruns; noise/framing/parity),
+     * counted in the UART error callback. */
     volatile uint32_t uart_overruns;
     volatile uint32_t uart_rx_errors;
 
@@ -71,38 +58,20 @@ typedef struct
     uint32_t    uart_rx_errors;
 } max_m10s_stats_t;
 
-/*
- * max_m10s_init - zero driver state, remember which UART the module is on, and
- * start circular DMA at that UART's current baud.
- *
- * The UART must already be initialised (with a DMA channel linked for RX), and
- * the driver owns its receive from here on.
- *
- * Returns MAX_M10S_OK, or MAX_M10S_ERR_HAL if the DMA could not be started.
- */
+/* Reset driver state and start circular RX DMA on an initialised UART at its
+ * current baud; MAX_M10S_ERR_HAL if the DMA cannot start. */
 WARN_UNUSED max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv,
                                             UART_HandleTypeDef *huart);
 
-/*
- * max_m10s_configure - send the full CFG-VALSET sequence and switch baud rate.
- *
- * Blocks until all six messages are ACKed or a failure is detected.
- *
- * Returns MAX_M10S_OK if all six messages are ACKed. Returns MAX_M10S_ERR_NAK or
- * MAX_M10S_ERR_TIMEOUT on any failure. It is safe to retry on failure.
- *
- */
+/* Negotiate the flight baud and send the full CFG-VALSET sequence, blocking until
+ * every message is ACKed or one fails (NAK, timeout, HAL error); safe to retry. */
 WARN_UNUSED max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv);
 
-/* max_m10s_drain - consume DMA bytes and feed them to the UBX parser.  */
+/* Feed received DMA bytes to the UBX parser; true with *frame at each complete frame. */
 bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame);
 
-/*
- * max_m10s_on_uart_error - call from HAL_UART_ErrorCallback() for the GNSS UART.
- */
+/* Call from HAL_UART_ErrorCallback() for the GNSS UART. */
 void max_m10s_on_uart_error(max_m10s_driver_t *drv);
 
-/*
- * max_m10s_get_stats - copy the receive health counters into *out.
- */
+/* Copy the receive health counters into *out. */
 void max_m10s_get_stats(const max_m10s_driver_t *drv, max_m10s_stats_t *out);

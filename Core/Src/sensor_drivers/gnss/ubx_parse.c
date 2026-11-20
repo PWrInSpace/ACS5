@@ -1,6 +1,4 @@
-/*
- * ACS5 - u-blox UBX protocol.
- */
+/* u-blox UBX protocol layer. */
 #include "sensor_drivers/gnss/ubx_parse.h"
 
 #include <assert.h>
@@ -80,9 +78,8 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
         }
         else if (b == UBX_SYNC1)
         {
-            /* B5 B5 62: the second B5 is the real frame's first byte. Staying
-             * here rather than returning to SYNC1 is what makes a run of B5
-             * bytes before a frame harmless. */
+            /* B5 B5 62: the second B5 starts the real frame, so stay rather
+             * than return to SYNC1. */
         }
         else
         {
@@ -117,9 +114,8 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 
         if (p->len > UBX_MAX_PAYLOAD)
         {
-            /* Either an unsupported message or a corrupt header; see the
-             * UBX_MAX_PAYLOAD comment for why both resync rather than skip. */
-
+            /* Unsupported message or corrupt header: resync rather than skip,
+             * since a corrupt length would swallow the frames after it. */
             p->stats.oversized++;
             ubx_parser_resync(p);
         }

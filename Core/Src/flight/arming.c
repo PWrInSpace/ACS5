@@ -1,18 +1,13 @@
 #include "flight/arming.h"
+#include "config/airframe.h"
 #include "utils/control_rate.h"
 
 ctrl_arm_config_t ctrl_arm_config_default(void)
 {
     return (ctrl_arm_config_t){
-        .lock_travel_ticks = SEC_TO_TICKS(0.5f),
-        /* Burnout is at about 148 m on this airframe. The margin is thinner than
-         * that looks: this is raw barometric AGL on a vehicle at 77.6 m/s, where
-         * port and boundary-layer effects read low and the sensor lags. Since a
-         * delayed arm comes straight out of the dynamic-pressure budget the
-         * maneuver depends on, the floor sits well under the worst credible
-         * error while staying far above anything the pad can produce. It is not
-         * a trigger and must not be tuned like one. */
-        .min_altitude_m    = 50.0f,
+        .lock_travel_ticks = SEC_TO_TICKS(AIRFRAME_CANARD_LOCK_TRAVEL_S),
+        /* A ground interlock, not a trigger: docs/design.md#altitude-floor */
+        .min_altitude_m    = AIRFRAME_ARM_MIN_ALTITUDE_M,
     };
 }
 
@@ -25,8 +20,7 @@ bool ctrl_arm_step(ctrl_arm_t *a, const ctrl_arm_input_t *in)
 {
     const ctrl_arm_config_t *c = &a->cfg;
 
-    /* Saturating, so a long coast cannot wrap the counter back under the
-     * threshold. */
+    /* Saturating, so a long coast cannot wrap the counter back under the threshold. */
     if (in->flight_state == FLIGHT_STATE_FREE_FLIGHT) {
         if (a->free_flight_ticks < c->lock_travel_ticks)
             a->free_flight_ticks++;
@@ -45,10 +39,8 @@ bool ctrl_arm_step(ctrl_arm_t *a, const ctrl_arm_input_t *in)
             break;
 
         case CTRL_ARM_ARMED:
-            /* Leaving free flight is apogee. Altitude is deliberately not
-             * consulted here: the arming point sits within metres of the floor,
-             * which is exactly where barometer noise crosses it, and a disarm
-             * is permanent. */
+            /* Leaving free flight is apogee. Altitude is not consulted: baro noise
+             * crosses the floor near the arming point, and a disarm is permanent. */
             if (in->flight_state != FLIGHT_STATE_FREE_FLIGHT)
                 a->state = CTRL_ARM_SPENT;
             break;

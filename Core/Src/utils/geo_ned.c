@@ -19,7 +19,6 @@ void geo_ned_datum_set(geo_ned_datum_t *d, int32_t lat_1e7, int32_t lon_1e7,
     d->lon_1e7   = lon_1e7;
     d->height_mm = height_mm;
 
-    /* Compute the scale factors once; they are reused for every fix. */
     const double lat_rad = (double)lat_1e7 * 1e-7 * DEG2RAD;
     const double s       = sin(lat_rad);
     const double w       = 1.0 - WGS84_E2 * s * s;
@@ -41,7 +40,7 @@ void geo_ned_from_geodetic(const geo_ned_datum_t *d,
     assert(d != NULL && out_ned_m != NULL);
     assert(d->valid);   /* the caller decides what to do without a datum */
 
-    // The differences are taken as integers so no precision is lost before the scaling. 
+    /* Differences taken as integers so no precision is lost before scaling. */
     const int64_t dlat = (int64_t)lat_1e7 - (int64_t)d->lat_1e7;
     const int64_t dlon = (int64_t)lon_1e7 - (int64_t)d->lon_1e7;
     const int64_t dh   = (int64_t)height_mm - (int64_t)d->height_mm;

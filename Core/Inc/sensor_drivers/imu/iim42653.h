@@ -1,30 +1,5 @@
-/*
- * IIM-42653 IMU Driver
- *
- * TDK InvenSense IIM-42653 6-axis IMU (3-axis accel + 3-axis gyro).
- * Communicates over SPI (Mode 0 or 3, max 24 MHz).
- *
- * Features:
- *   - Configurable ODR (up to 32 kHz) and FSR
- *   - Burst read of temperature + accel + gyro + INT_STATUS in 17 bytes;
- *     a read without DATA_RDY is rejected as stale
- *   - Factory-trimmed gyro notch left as shipped
- *   - Multi-bank register access
- *   - Output in SI units: m/s^2, rad/s, degC
- *
- * Hardware mapping (ACS5 / ORC Meteor):
- *   SPI2: PB13 (SCK) / PB14 / PB15 — IOSwap enabled (Meteor SDI/SDO nets)
- *   CS:   PD13 (IMU_CS)
- *   INT1: PD11 (IMU_INT1)
- *   INT2: PD12 (IMU_INT2)
- *
- * Typical usage:
- *   iim42653_t imu;
- *   iim42653_init(&imu, &hspi2, IMU_CS_GPIO_Port, IMU_CS_Pin);
- *   iim42653_configure(&imu, ... iim42653_config_rocket_default() ...);
- *   iim42653_sample_t sample;
- *   iim42653_read(&imu, &sample);
- */
+/* TDK IIM-42653 6-axis IMU driver over SPI (mode 0/3, max 24 MHz); SI-unit output.
+ * Board: SPI2 PB13/PB14/PB15 with IOSwap (Meteor SDI/SDO nets), CS PD13, INT1 PD11, INT2 PD12. */
 
 #pragma once
 
@@ -39,7 +14,7 @@
 #include "spi.h"  // SPI_HandleTypeDef
 
 /* ====================================================
- * iim42653_sample_t - output data posted to the mailbox
+ * iim42653_sample_t - one converted sample
  * ==================================================== */
 
 typedef struct
@@ -260,12 +235,8 @@ typedef enum
     IIM42653_TEMP_FILTER_BW_HZ_5    = 6,
 } iim42653_temp_filter_bw_t;
 
-/*
- * Anti-Alias Filter bandwidth preset: the three register parameters (DELT,
- * DELTSQR, BITSHIFT) the hardware needs for a given 3 dB bandwidth. Pick a row
- * from the AAF table in datasheet section 5.3; the three values are not
- * independent, so they must be copied together.
- */
+/* Anti-alias filter preset for one 3 dB bandwidth; the three values are coupled,
+ * so copy a whole row of the datasheet AAF table (section 5.3). */
 typedef struct
 {
     uint8_t  delt;
@@ -293,15 +264,8 @@ typedef struct
     axes_remap_t                 axes;  /* sensor to body; configure() rejects a reflection */
 } iim42653_config_t;
 
-/*
- * Default rocket-flight configuration (register-read mode):
- *   - Gyro:  +/-2000 dps @ 1 kHz, 2nd-order filter BW = ODR/8
- *   - Accel: +/-32 g    @ 1 kHz, 2nd-order filter BW = ODR/8
- *   - AAF:   ~536 Hz on both (rejects motor vibration aliasing)
- *   - Notch: factory trim, enabled
- *   - Temp filter: 40 Hz (low noise for slow-varying temperature)
- *   - DRDY routed to INT1 so INT_STATUS reports it
- */
+/* Rocket defaults: +/-2000 dps and +/-32 g at 1 kHz, 2nd-order ODR/8 UI filters,
+ * 536 Hz AAF, factory notch, 40 Hz temperature filter; remap left unset. */
 iim42653_config_t iim42653_config_rocket_default(void);
 
 /* ==================
@@ -324,10 +288,7 @@ typedef struct
     float gyro_scale;  /* LSB -> rad/s */
 } iim42653_t;
 
-/*
- * Initialize the IMU: soft reset, WHO_AM_I check, interface config (SPI 4-wire,
- * big-endian), PLL clock select. false on comm failure or wrong WHO_AM_I.
- */
+/* Soft reset, WHO_AM_I check, SPI/clock interface setup; false on comm failure or wrong ID. */
 WARN_UNUSED bool iim42653_init(iim42653_t *self, SPI_HandleTypeDef *spi,
                                GPIO_TypeDef *cs_port, uint16_t cs_pin);
 

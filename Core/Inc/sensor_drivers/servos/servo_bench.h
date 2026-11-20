@@ -1,8 +1,5 @@
-/*
- * Bench sequence for the servo test build: one fin at a time through
- * +10 / -10 / 0 deg, then the canard lock open / closed. Pure function of
- * time, host-testable.
- */
+/* Servo bench sequence as a pure function of time: each fin through +10 / -10 / 0 deg,
+ * then the canard lock open / closed. */
 #pragma once
 
 #include <stdint.h>

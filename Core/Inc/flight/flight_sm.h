@@ -3,8 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Values are logged as uint8_t into the flight CSV; post-flight tooling reads
- * them numerically, so do not renumber. */
+/* Logged as uint8_t and decoded numerically post-flight, so do not renumber. */
 typedef enum
 {
     FLIGHT_STATE_STANDBY      = 0,
@@ -24,17 +23,12 @@ typedef struct
     float    apogee_alt_drop_m;   /* ... AND this far below peak -> FALLING */
     float    recovery_vel_mps;    /* FALLING->RECOVERY when vz above this */
     int      recovery_debounce;
-    float    baro_vel_tau_s;      /* vz low-pass time constant; the per-sample
-                                   * coefficient is derived from the measured
-                                   * baro interval, so the filter keeps its
-                                   * response when the baro cadence changes */
-    float    baro_vel_min_span_s; /* shortest altitude difference the vz
-                                   * estimate is taken over; see flight_sm.c */
+    float    baro_vel_tau_s;      /* vz low-pass time constant, s */
+    float    baro_vel_min_span_s; /* shortest span the vz difference is taken over, s */
     uint32_t post_falling_timeout_ticks;  /* mission_complete latches this long after FALLING entry */
     uint32_t max_coast_ticks;     /* FREE_FLIGHT->FALLING regardless of baro */
-    /* Launch confirmation: after launch_confirm_ticks in ACCELERATION, return to
-     * STANDBY if the baro climbed less than launch_confirm_baro_m AND the
-     * IMU-integrated climb is below launch_confirm_imu_m. */
+    /* After launch_confirm_ticks in ACCELERATION, back to STANDBY if the baro climbed
+     * less than launch_confirm_baro_m AND the IMU climb is below launch_confirm_imu_m. */
     uint32_t launch_confirm_ticks;
     float    launch_confirm_baro_m;
     float    launch_confirm_imu_m;

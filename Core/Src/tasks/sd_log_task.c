@@ -84,18 +84,7 @@ static void halt_with_code(unsigned code)
     }
 }
 
-/**
-  * @brief  SD card logging task.
-  *
-  * LED legend:
-  *   LD2 ON solid        -> task started, waiting on f_mount
-  *   LD2 OFF             -> f_mount returned
-  *   LD1 blinks N times  -> f_mount failed, N = FRESULT error code
-  *   LD1 blinks 20 times -> f_open failed
-  *   LD3 ON solid        -> mount OK, file opened
-  *   LD3 toggles         -> log synced to the card
-  *   LD2 ON again        -> a write or sync failed (counted in log_errors)
-  */
+/* SD card logging task. LED codes: docs/design.md#sd-logging-led-codes */
 void StartSDTask(void *argument)
 {
     (void)argument;

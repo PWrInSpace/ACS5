@@ -1,7 +1,5 @@
-// Closed-loop test of the sequencer + cascade against a toy roll plant:
-//   p_dot = K_CANARD * delta - C_DAMP * p
-// Numbers give a fast, well-damped inner loop so the test checks sequencing
-// and convergence, not flight-gain quality (that is the simulator's job).
+// Closed-loop tests of the roll sequencer and cascade against a toy plant:
+//   p_dot = K_CANARD * delta - C_DAMP * p + bias
 #include "test_assert.h"
 #include <math.h>
 #include <stdio.h>
@@ -16,8 +14,7 @@
 #define K_CANARD 50.0f    /* rad/s^2 per rad of deflection */
 #define C_DAMP   2.0f     /* 1/s aero damping */
 
-/* bias is a constant roll torque (rad/s^2), standing in for an aero trim
- * offset; it forces a nonzero steady-state deflection in HOLD. */
+/* bias: constant roll torque (rad/s^2) modelling an aero trim offset. */
 typedef struct { float p, angle, bias; quat_t q; } plant_t;
 
 static void plant_init(plant_t *pl, float p0)
@@ -37,12 +34,8 @@ static roll_ctrl_config_t test_cfg(void)
 {
     roll_ctrl_config_t c = roll_ctrl_config_default();
     c.kp_rate = 0.08f;            /* stronger than flight default: toy plant */
-    /* Pinned, not inherited: tuning retunes the production defaults, and every
-     * one of these sets a margin the tests below depend on. kp_angle sets how
-     * hard HOLD pulls the residual angle error back against the bias torque,
-     * which is what test_full_sequence's 5 deg window measures. The profile
-     * limits set how long the 90 deg rotation takes, which has to fit inside
-     * that test's 8 s budget with room for the convergence it then asserts. */
+    /* Pinned rather than inherited from the defaults: the time budgets and
+     * angle windows below depend on them. */
     c.kp_angle                = 2.0f;
     c.profile_max_rate_rads   = 1.8326f;    /* 105 deg/s */
     c.profile_max_accel_rads2 = 3.6652f;    /* 210 deg/s^2 */
@@ -76,10 +69,7 @@ static void test_full_sequence(void)
 
     CHECK(rc.phase == ROLL_CTRL_HOLD);
     CHECK_NEAR(rc.theta_meas, PI_F / 2.0f, 0.09f);   /* within ~5 deg */
-    /* Weak sanity check that the plant moved at all. This is absolute angle,
-     * so it also carries whatever DAMP shed from p0 - theta_meas above is what
-     * pins the 90 deg. */
-    CHECK(fabsf(pl.angle) > 1.0f);
+    CHECK(fabsf(pl.angle) > 1.0f);          /* absolute angle, includes DAMP */
     CHECK_NEAR(pl.p, 0.0f, 0.35f);          /* re-stabilized (< 20 deg/s) */
 }
 
@@ -100,9 +90,7 @@ static void test_disable_returns_to_idle_neutral(void)
     CHECK(d == 0.0f);                    /* canards neutral */
 }
 
-/* rate_sp exists only to be logged - nothing in the loop reads it back - so
- * without this the field could silently stop tracking the outer loop and the
- * flight log would carry a plausible-looking lie into system identification. */
+/* rate_sp is log-only: it must follow the outer-loop command in every phase. */
 static void test_rate_sp_tracks_the_outer_loop(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -148,9 +136,7 @@ static void test_abort_on_invalid_estimate(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* The debounce is the whole point of not latching on one sample: a blip
- * shorter than the window must leave the maneuver running, and repeated
- * blips must never accumulate across the good ticks between them. */
+/* Fault bursts shorter than the debounce never abort, and do not accumulate. */
 static void test_transient_fault_does_not_abort(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -159,9 +145,7 @@ static void test_transient_fault_does_not_abort(void)
     plant_t pl;
     plant_init(&pl, 0.0f);
 
-    /* At a threshold of 1 there is no debounce and the burst below would be
-     * zero ticks long, so the test would pass without exercising anything. */
-    CHECK(cfg.abort_debounce_ticks > 1u);
+    CHECK(cfg.abort_debounce_ticks > 1u);   /* bursts below are N-1 ticks long */
 
     run(&rc, &pl, CTRL_HZ * 2, true, NULL);
     CHECK(rc.phase != ROLL_CTRL_ABORT);
@@ -174,7 +158,7 @@ static void test_transient_fault_does_not_abort(void)
             plant_step(&pl, roll_ctrl_step(&rc, &bad));
             CHECK(rc.phase != ROLL_CTRL_ABORT);
         }
-        /* One good tick must clear the count, or the bursts would sum. */
+        /* One good tick clears the count. */
         roll_ctrl_input_t good = { .q = pl.q, .q_valid = true,
                                    .roll_rate_rads = pl.p,
                                    .maneuver_enabled = true };
@@ -184,13 +168,7 @@ static void test_transient_fault_does_not_abort(void)
     CHECK(rc.phase != ROLL_CTRL_ABORT);
 }
 
-/* A rejected quaternion must never reach the angle state. The debounce leaves
- * the maneuver running for up to N-1 faulted ticks, and NaN is absorbing: it
- * propagates through quat_mul into theta_meas and theta_prev_wrapped, clampf
- * passes it through (both of its comparisons are false on NaN), and the inner
- * loop's low-pass and slew are self-referential, so a single bad sample would
- * pin the deflection at NaN for the rest of the armed window - long after the
- * data recovers and the abort count has reset. */
+/* A rejected quaternion never reaches the angle state (NaN would be absorbing). */
 static void test_transient_bad_quaternion_keeps_output_finite(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -204,8 +182,7 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
 
     const quat_t q_nan = {NAN, 0.0f, 0.0f, 0.0f};
 
-    /* q_valid true on purpose: the finiteness check, not the estimator flag,
-     * is what has to catch this. */
+    /* q_valid true: the finiteness check, not the estimator flag, must catch it. */
     roll_ctrl_input_t bad = { .q = q_nan, .q_valid = true,
                               .roll_rate_rads = pl.p, .maneuver_enabled = true };
     float d = roll_ctrl_step(&rc, &bad);
@@ -224,7 +201,7 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
     }
     CHECK(rc.phase != ROLL_CTRL_ABORT);
 
-    /* Skipping the angle update must not cost the latch when it persists. */
+    /* A persistent bad quaternion still aborts. */
     for (unsigned i = 0; i < cfg.abort_debounce_ticks; i++) {
         roll_ctrl_input_t in = { .q = q_nan, .q_valid = true,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
@@ -233,9 +210,8 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* A dead attitude estimate ends the maneuver but must not disarm the
- * damper - the gyro is still good. Benchmark against the same plant with
- * neutral canards: that is what a controller blinded by q_valid would do. */
+/* Lost attitude aborts the maneuver but keeps damping on the gyro; the
+ * reference is the same plant with neutral canards. */
 static void test_abort_damps_on_gyro_when_attitude_is_lost(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -246,13 +222,7 @@ static void test_abort_damps_on_gyro_when_attitude_is_lost(void)
     plant_init(&controlled, 3.5f);
     plant_init(&coasting, 3.5f);
 
-    /* 0.4 s: the horizon, not the latch tick, is what sets the margin below.
-     * The damper adds K_CANARD*kp_rate to C_DAMP, so the controlled rate decays
-     * at roughly 6/s against the coasting plant's 2/s and the ratio falls off
-     * exponentially with the window: 0.58 at 100 ticks, which does not clear
-     * the assert at all, against 0.33 at 200. The longer horizon buys margin
-     * without costing sensitivity - at half the damper gain (kp_rate 0.04) the
-     * ratio is 0.61 and this still fails. */
+    /* 200 ticks: at 100 the controlled/coasting rate ratio is still above 0.5. */
     for (int i = 0; i < 200; i++) {
         roll_ctrl_input_t in = { .q = controlled.q, .q_valid = false,
                                  .roll_rate_rads = controlled.p,
@@ -265,11 +235,7 @@ static void test_abort_damps_on_gyro_when_attitude_is_lost(void)
     CHECK_NEAR(controlled.p, 0.0f, 0.5f * fabsf(coasting.p));
 }
 
-/* ABORT is pure rate damping, and on a trimmed airframe holding the rate at
- * zero *is* a standing deflection - the one the integrator learned. Clearing it
- * on the way in would hand ABORT back the steady rate error the trim produces,
- * which is the opposite of damping well. So the integrator carries over, and
- * what must not carry over is any angle-derived term: ABORT commands no angle. */
+/* ABORT keeps the learned trim integrator but drops every angle-derived term. */
 static void test_abort_keeps_the_trim_correction(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -291,8 +257,7 @@ static void test_abort_keeps_the_trim_correction(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
     CHECK(rc.rate_sp == 0.0f);                   /* no angle command survives */
 
-    /* Hold the estimate rejected so this measures ABORT and not the phase it
-     * recovers into - the damping claim is about ABORT. */
+    /* Estimate kept rejected so the controller stays in ABORT. */
     for (int i = 0; i < CTRL_HZ * 2; i++) {
         roll_ctrl_input_t in = { .q = pl.q, .q_valid = false,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
@@ -303,10 +268,7 @@ static void test_abort_keeps_the_trim_correction(void)
     CHECK_NEAR(pl.p, 0.0f, 0.05f);   /* still damped against the trim it kept */
 }
 
-/* 0 is the natural way to spell "no debounce", but it makes the threshold
- * comparison false before the counter can move. roll_ctrl_init clamps it to
- * exactly 1: asserting on the first faulted tick is what pins that value, where
- * a longer run of faulted ticks would pass for any clamp up to its length. */
+/* abort_debounce_ticks = 0 behaves as 1: abort on the first faulted tick. */
 static void test_zero_debounce_still_aborts(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -325,19 +287,14 @@ static void test_zero_debounce_still_aborts(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* A bad gyro holds the last good sample rather than substituting zero. Zero
- * would claim the airframe had stopped rotating, and the loop would unwind the
- * damping command it is holding for as long as the fault lasted. Held, the loop
- * sees the previous sample; with the rate constant, as it is here, that is
- * exactly what a good tick would have given. */
+/* A bad gyro sample is replaced by the last good one, not by zero. */
 static void test_bad_gyro_holds_last_sample(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
     roll_ctrl_t rc;
     roll_ctrl_init(&rc, &cfg);
 
-    /* Well clear of settle_rate_rads, so this stays in DAMP and measures the
-     * inner loop alone; constant, so it settles to a fixed deflection. */
+    /* Constant and above settle_rate_rads: stays in DAMP. */
     const float p_steady = 3.0f;
     float d = 0.0f;
     for (int i = 0; i < CTRL_HZ; i++) {
@@ -355,12 +312,7 @@ static void test_bad_gyro_holds_last_sample(void)
     CHECK_NEAR(d_bad, d, 1e-6f);
 }
 
-/* The first good tick after a fault presents the whole rate change that
- * happened during it as one step in the error. The command must absorb that
- * without reversing: the low-pass admits only target_lpf_alpha of it and the
- * slew caps the move at deflection_slew_rads*dt_s, so the recovery costs a few
- * ticks of damping authority and nothing more. That bounded cost is what this
- * pins. */
+/* Recovery from a bad-gyro run keeps the command bounded and opposing the roll. */
 static void test_bad_gyro_recovery_stays_bounded(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -373,8 +325,7 @@ static void test_bad_gyro_recovery_stays_bounded(void)
     CHECK(rc.phase == ROLL_CTRL_DAMP);
     CHECK(pl.p > cfg.settle_rate_rads);   /* stays in DAMP across the window */
 
-    /* One tick short of the debounce, so the fault ends without latching and
-     * the recovery tick below is reached at all. */
+    /* One tick short of the debounce: the fault ends without aborting. */
     for (unsigned i = 0; i < cfg.abort_debounce_ticks - 1u; i++) {
         roll_ctrl_input_t bad = { .q = pl.q, .q_valid = true,
                                   .roll_rate_rads = NAN,
@@ -397,11 +348,7 @@ static void test_bad_gyro_recovery_stays_bounded(void)
         plant_step(&pl, d);
     }
     CHECK(rc.phase == ROLL_CTRL_DAMP);
-    /* Down from 3 rad/s to under 20 deg/s in either direction. The bound is on
-     * magnitude because integral action closes the last of the error by
-     * crossing zero rather than creeping up to it; what must not happen is the
-     * rate growing, or flipping into a spin the other way, which is what a sign
-     * error or a runaway would look like here. */
+    /* Magnitude bound: integral action closes the last error by crossing zero. */
     CHECK_NEAR(pl.p, 0.0f, 0.35f);
 }
 
@@ -424,12 +371,7 @@ static void test_abort_on_excess_rate(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* A vehicle that cannot rotate at all is the worst case the old watchdog was
- * written for, and it used to end in ABORT - canards standing down for the rest
- * of the coast. It now ends in HOLD: the profile completes regardless of what
- * the airframe managed, and HOLD keeps the angle loop and the damper working
- * with whatever authority does exist. Nothing here is a sensor fault, so
- * nothing here justifies abandoning angle control. */
+/* With no control authority the profile still completes and HOLD is reached. */
 static void test_no_authority_still_reaches_hold(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -443,38 +385,18 @@ static void test_no_authority_still_reaches_hold(void)
     CHECK(rc.phase == ROLL_CTRL_HOLD);
 }
 
-/* Regression pin on DAMP with the shipped defaults.
- *
- * The expected values below were captured from this implementation and have no
- * authority beyond that: they assert only that DAMP still does what it does
- * today. Tasks 6-8 rewire the call sites around this controller, and a diff
- * here means one of them changed the damper's numeric behavior - which may be
- * intended, but must not happen silently. */
+/* Golden DAMP output with the default config, captured from this implementation. */
 static void test_damp_regression_pin(void)
 {
     roll_ctrl_config_t cfg = roll_ctrl_config_default();
-    /* Golden samples were captured at 500 Hz dt; pin that so a CONTROL_LOOP_HZ
-     * flight-rate change does not silently invalidate this regression. */
+    /* Golden samples were captured at 500 Hz, independent of CONTROL_LOOP_HZ. */
     const int pin_hz = 500;
     cfg.dt_s = 1.0f / (float)pin_hz;
     roll_ctrl_t rc;
     roll_ctrl_init(&rc, &cfg);
 
-    /* Offset well clear of settle_rate_rads so the sequencer stays in DAMP
-     * for the whole run and this measures the inner loop alone.
-     *
-     * The offset also has to stay small enough to leave headroom under the
-     * deflection limit. This scenario feeds a fixed rate with no plant behind
-     * it, so the error never decays and the integrator keeps growing; a larger
-     * offset parks the late rows within a few percent of the limit, where a
-     * retune would clip instead of showing up as a diff.
-     *
-     * Every row is a joint function of kp_rate, ki_rate and target_lpf_alpha,
-     * which is what makes them catch a retune. The command never reaches the
-     * slew limit at this excitation, so nothing here constrains it -
-     * test_slew_limit_bounds_command_rate covers that separately. The last row
-     * is where the integrator dominates: by tick 500 it carries most of the
-     * command. */
+    /* Rate offset above settle_rate_rads (stays in DAMP) yet small enough that
+     * the open-loop integrator stays clear of the deflection limit and slew. */
     static const struct { int tick; float delta; } expect[] = {
         {   8, -0.085304655f },
         {   9, -0.088229969f },
@@ -493,8 +415,7 @@ static void test_damp_regression_pin(void)
         };
         float d = roll_ctrl_step(&rc, &in);
         if (next < sizeof expect / sizeof expect[0] && expect[next].tick == k) {
-            /* Loose enough to absorb libm sinf differing by an ulp or two
-             * across versions, tight enough that any real retune shows. */
+            /* Tolerance covers libm sinf ulp differences. */
             CHECK_NEAR(d, expect[next].delta, 1e-5f);
             next++;
         }
@@ -503,11 +424,7 @@ static void test_damp_regression_pin(void)
     CHECK(rc.phase == ROLL_CTRL_DAMP);
 }
 
-/* A steady aero trim torque leaves a proportional rate loop with a standing
- * error of bias/(K_CANARD*kp_rate + C_DAMP). The settle gate is what that error
- * runs into, so on the real airframe a quarter degree of fin misalignment - a
- * tolerance nobody guarantees - is already enough to hold the sequencer in DAMP
- * for the whole coast and skip the maneuver entirely. */
+/* A constant trim torque must not hold the sequencer in DAMP past the settle gate. */
 static void test_constant_disturbance_still_reaches_rotate(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -522,12 +439,7 @@ static void test_constant_disturbance_still_reaches_rotate(void)
     CHECK(rc.phase == ROLL_CTRL_ROTATE || rc.phase == ROLL_CTRL_HOLD);
 }
 
-/* The integrator cancels a standing trim torque. Tracking lag behind the moving
- * profile is not one: it is the loop doing its job, it reverses sign when the
- * profile decelerates, and integrating it hands ROTATE a wound-up bias that
- * carries straight through the target. The trim does not change over the two
- * seconds of the rotation, so freezing what DAMP learned keeps the correction
- * without the windup. */
+/* The rate integrator is frozen at its DAMP value throughout ROTATE. */
 static void test_integrator_frozen_during_rotate(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -549,11 +461,7 @@ static void test_integrator_frozen_during_rotate(void)
     CHECK(rc.rate_integrator == frozen);
 }
 
-/* A rotation that ends a few degrees short is a maneuver that nearly worked,
- * and HOLD is the phase built to close that gap - it has the angle loop and the
- * integrator. Gating the handover on the error being small already meant the
- * near-miss sat in ROTATE until the watchdog degraded it to plain damping,
- * throwing away the whole maneuver to avoid finishing it imperfectly. */
+/* ROTATE hands over to HOLD when the profile ends, even if the angle lags. */
 static void test_rotate_hands_over_to_hold_even_when_short(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -568,8 +476,7 @@ static void test_rotate_hands_over_to_hold_even_when_short(void)
     CHECK(rc.phase == ROLL_CTRL_HOLD);
 }
 
-/* Deterministic, so the dither bound below means the same thing on every run
- * and every libm. Range [-1, 1). */
+/* Deterministic xorshift noise in [-1, 1). */
 static uint32_t g_noise = 0x1234567u;
 static float noise_step(void)
 {
@@ -577,11 +484,7 @@ static float noise_step(void)
     return (float)(g_noise >> 8) / 8388608.0f - 1.0f;
 }
 
-/* Differentiating the raw gyro at 500 Hz multiplies sensor noise by 1/dt before
- * the low-pass ever sees it, and the result lands on four servos that then chase
- * it for the whole hold to apogee - current, heat and gear wear bought with
- * nothing, since what damps this airframe is its own aerodynamics. The loop has
- * to stay quiet under a noisy measurement. */
+/* Gyro noise must not turn into continuous servo travel. */
 static void test_command_does_not_chatter_on_gyro_noise(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -593,8 +496,7 @@ static void test_command_does_not_chatter_on_gyro_noise(void)
     for (int i = 0; i < n; i++) {
         roll_ctrl_input_t in = {
             .q = quat_identity(), .q_valid = true,
-            /* Held above settle_rate_rads so this stays in DAMP and measures
-             * the inner loop alone. */
+            /* Above settle_rate_rads: stays in DAMP. */
             .roll_rate_rads = 0.5f + 0.01f * noise_step(),
             .maneuver_enabled = true,
         };
@@ -605,10 +507,7 @@ static void test_command_does_not_chatter_on_gyro_noise(void)
     CHECK(travel / (float)(n - 1) < 1e-3f);
 }
 
-/* The slew limit is what keeps a step in the command from being handed to four
- * servos as a step. It only binds on large, fast changes, which the tuned loop
- * no longer produces at ordinary excitation - so it needs its own excitation
- * rather than riding along in the regression pin. */
+/* Command change per tick never exceeds deflection_slew_rads * dt_s. */
 static void test_slew_limit_bounds_command_rate(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -620,8 +519,7 @@ static void test_slew_limit_bounds_command_rate(void)
     bool  ever_bound = false;
 
     for (int i = 0; i < 200; i++) {
-        /* Sign flips every 20 ticks: a demand the loop chases hard in one
-         * direction, then hard the other way. */
+        /* Large rate demand whose sign flips every 20 ticks. */
         float rate = ((i / 20) % 2 == 0) ? 8.0f : -8.0f;
         roll_ctrl_input_t in = { .q = quat_identity(), .q_valid = true,
                                  .roll_rate_rads = rate, .maneuver_enabled = true };
@@ -630,14 +528,10 @@ static void test_slew_limit_bounds_command_rate(void)
         if (fabsf(fabsf(d - prev) - max_step) < 1e-7f) ever_bound = true;
         prev = d;
     }
-    CHECK(ever_bound);   /* otherwise the bound above proves nothing */
+    CHECK(ever_bound);
 }
 
-/* Rejecting a constant roll moment in HOLD needs no integrator on the angle.
- * The rate integrator drives the rate error to zero, and with the vehicle at
- * rest the only fixed point of that is rate_sp = 0, which the outer loop only
- * produces at zero angle error. So the trim is cancelled at the angle even
- * though nothing integrates the angle. */
+/* HOLD cancels a constant trim at the angle through the rate integrator alone. */
 static void test_hold_rejects_constant_trim(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -656,11 +550,7 @@ static void test_hold_rejects_constant_trim(void)
     CHECK_NEAR(pl.p, 0.0f, 0.02f);
 }
 
-/* Sensor faults are transient by nature and the coast is over seven seconds
- * long, so ending the maneuver on one is throwing away the objective to avoid a
- * risk that has already passed. Recovery has to resume the *same* maneuver
- * though: capturing a fresh reference would rotate another 90 deg from wherever
- * the airframe happens to point by then, which is not what was asked for. */
+/* A data-fault abort recovers and resumes against the original q_ref. */
 static void test_data_fault_abort_recovers_against_the_same_reference(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -689,9 +579,7 @@ static void test_data_fault_abort_recovers_against_the_same_reference(void)
     CHECK_NEAR(rc.theta_meas, cfg.target_angle_rad, 0.09f);
 }
 
-/* The rate abort is not a sensor complaint. Past 720 deg/s something is wrong
- * with the airframe or with the sign of the servo channels, and neither heals;
- * retrying would just re-enter the same divergence with a running start. */
+/* An over-rate abort stays latched even after the data turns healthy. */
 static void test_excess_rate_abort_stays_latched(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -715,10 +603,7 @@ static void test_excess_rate_abort_stays_latched(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* Damping command after n ticks at a given dynamic pressure, from a fresh
- * controller. The rate is small on purpose: the whole command is linear in the
- * scheduled gain, so the ratio between two runs is exact right up until the
- * slew limiter binds, and a large error makes the higher-gain run hit it. */
+/* Damping command after n ticks at qbar_pa from a fresh controller. */
 static float damp_command_at(float qbar_pa, int ticks)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -727,6 +612,7 @@ static float damp_command_at(float qbar_pa, int ticks)
 
     float d = 0.0f;
     for (int i = 0; i < ticks; i++) {
+        /* Small rate keeps the higher-gain run below the slew limit. */
         roll_ctrl_input_t in = { .q = quat_identity(), .q_valid = true,
                                  .roll_rate_rads = 0.1f, .qbar_pa = qbar_pa,
                                  .maneuver_enabled = true };
@@ -735,9 +621,7 @@ static float damp_command_at(float qbar_pa, int ticks)
     return d;
 }
 
-/* Canard authority is proportional to dynamic pressure, so holding the loop
- * gain constant means raising the controller gain as qbar falls. Without it the
- * gains describe the airframe for about one second of a seven second coast. */
+/* Controller gain scales with qbar_ref / qbar. */
 static void test_gain_scales_inversely_with_dynamic_pressure(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -747,21 +631,17 @@ static void test_gain_scales_inversely_with_dynamic_pressure(void)
     float at_quarter = damp_command_at(cfg.qbar_ref_pa * 0.25f, 2);
 
     CHECK(fabsf(at_ref) > 1e-4f);
-    /* Four times the gain, so four times the command, while both are far from
-     * the deflection limit. */
     CHECK_NEAR(at_quarter / at_ref, 4.0f, 0.05f);
 }
 
-/* The ratio diverges as qbar goes to zero. Unclamped, the last second before
- * apogee would be spent amplifying gyro noise into the stops. */
+/* gain_scale stays within [gain_scale_min, gain_scale_max]. */
 static void test_gain_scale_is_clamped(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
     roll_ctrl_t rc;
     roll_ctrl_init(&rc, &cfg);
 
-    /* Above the floor, so the scheduler runs, but far enough below the
-     * reference that an unclamped ratio would be enormous. */
+    /* Just above the floor: scheduling active, unclamped ratio far above max. */
     roll_ctrl_input_t in = { .q = quat_identity(), .q_valid = true,
                              .roll_rate_rads = 0.4f,
                              .qbar_pa = cfg.qbar_floor_pa * 1.01f,
@@ -771,12 +651,7 @@ static void test_gain_scale_is_clamped(void)
     CHECK(rc.gain_scale >= cfg.gain_scale_min - 1e-6f);
 }
 
-/* Near apogee there is no authority left to chase gyro noise with, so the
- * proportional path is dropped - but the trim correction is not. A standing
- * trim and the canards that oppose it both scale with dynamic pressure, so the
- * deflection that cancels the trim stays correct all the way to apogee, and
- * releasing it would let the disturbance walk the airframe off the target for
- * the rest of the coast. The command moves under the slew limit, not in a step. */
+/* Below the qbar floor the command slews to the held integrator alone. */
 static void test_below_qbar_floor_holds_the_trim_correction(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -803,16 +678,11 @@ static void test_below_qbar_floor_holds_the_trim_correction(void)
         prev = d;
     }
     CHECK(rc.below_qbar_floor);
-    /* Settled on the integrator, which is the only term still contributing. */
     CHECK_NEAR(d, rc.rate_integrator, 1e-4f);
-    /* And that term is real: the rate error above was one-sided, so DAMP wound
-     * it up rather than leaving it at zero. */
     CHECK(fabsf(rc.rate_integrator) > 1e-3f);
 }
 
-/* A caller with no airspeed estimate passes zero, which is the absence of a
- * measurement rather than a measurement of zero. Standing the canards down on
- * that would turn a missing field into a silently disabled controller. */
+/* qbar_pa = 0 means unknown: unity gain, floor not applied, controller active. */
 static void test_absent_dynamic_pressure_disables_scheduling(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -829,11 +699,7 @@ static void test_absent_dynamic_pressure_disables_scheduling(void)
     CHECK(fabsf(d) > 1e-5f);
 }
 
-/* The integrator answers the same plant the proportional term does, so it has
- * to be scheduled with it. Left unscaled, the loop's integral time stretches by
- * gain_scale - up to eight seconds at the clamp, longer than the whole coast -
- * and the term that exists to cancel a standing trim stops arriving in time to
- * do it. */
+/* The integrator gain is scheduled with qbar like the proportional gain. */
 static void test_integrator_is_scheduled_with_the_proportional_term(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -856,11 +722,7 @@ static void test_integrator_is_scheduled_with_the_proportional_term(void)
     CHECK_NEAR(wound[1] / wound[0], 4.0f, 0.05f);
 }
 
-/* A rate excursion violent enough to abort is exactly the one that runs the
- * gyro into its full-scale limit, so the run that trips the threshold can end
- * on an invalid sample rather than an over-limit one. Deciding the latch on the
- * triggering tick alone lets the airframe that most needs the latch slip
- * through it and try again. */
+/* Over-rate latches the abort even when the tripping tick is an invalid sample. */
 static void test_overspeed_latches_even_when_the_run_ends_invalid(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
@@ -877,8 +739,7 @@ static void test_overspeed_latches_even_when_the_run_ends_invalid(void)
                                    .maneuver_enabled = true };
         roll_ctrl_step(&rc, &fast);
     }
-    /* The sensor gives up at the peak: the tick that trips the threshold is a
-     * data fault, not an over-limit reading. */
+    /* Gyro saturates to an invalid sample on the tripping tick. */
     roll_ctrl_input_t bad = { .q = pl.q, .q_valid = true, .roll_rate_rads = NAN,
                               .maneuver_enabled = true };
     roll_ctrl_step(&rc, &bad);
@@ -889,11 +750,7 @@ static void test_overspeed_latches_even_when_the_run_ends_invalid(void)
     CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
-/* An estimator that drops out every few ticks must not be able to drive the
- * sequencer back and forth across ABORT for the whole coast: each recovery
- * restarts the profile while every abort brakes to zero, so the maneuver makes
- * no progress and four servos pay for it. Recovery therefore demands a much
- * longer run of healthy data than the abort demands of bad data. */
+/* Intermittent faults do not cycle the sequencer in and out of ABORT. */
 static void test_intermittent_faults_do_not_thrash_the_sequencer(void)
 {
     roll_ctrl_config_t cfg = test_cfg();
