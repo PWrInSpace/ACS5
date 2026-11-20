@@ -79,6 +79,7 @@ set(ACS5_SOURCES
     Core/Src/sensor_drivers/gnss/ubx_parse.c
     Core/Src/tasks/gnss_task.c
     Core/Src/tasks/sd_log_task.c
+    Core/Src/log/log_record.c
     Core/Src/usb_print.c
     Core/Src/utils/axes_remap.c
     Core/Src/utils/geo_ned.c

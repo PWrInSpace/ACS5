@@ -17,6 +17,7 @@
 #include "tasks/gnss_task.h"
 #include "tasks/sd_log_task.h"
 #include "utils/mathx.h"
+#include "utils/quat.h"
 #include "utils/fault_record.h"
 #include "utils/timestamp.h"
 #include "spi.h"
@@ -37,9 +38,9 @@ static iim42653_t   g_imu;
 static ms5611_t     g_baro;
 static mmc5983ma_t  g_mag;
 static attitude_t g_est;
+static const float k_roll_axis[3] = { [BODY_AXIS_ROLL] = 1.0f };
 static servo_bank_t75_t g_servos;
 
-extern osThreadId_t sdTaskHandle;   /* created in freertos.c */
 
 /* SPLIT V3: MOSFET gate HIGH powers the camera. PC0/PC2 held off for now. */
 static void camera_set_enabled(bool on)
@@ -135,12 +136,13 @@ static void run_servo_bench(servo_bank_t75_t *servos)
 }
 #endif
 
+/* ZYX Euler by axis; z is the airframe roll axis. */
 static void print_attitude_deg(const float euler_rad[3])
 {
-    USB_PRINTF("ATT Pitch:%7.2f  Yaw:%7.2f  Roll:%7.2f\r\n",
+    USB_PRINTF("EUL x:%7.2f y:%7.2f z:%7.2f deg\r\n",
+               euler_rad[0] * RAD2DEG,
                euler_rad[1] * RAD2DEG,
-               euler_rad[2] * RAD2DEG,
-               euler_rad[0] * RAD2DEG);
+               euler_rad[2] * RAD2DEG);
 }
 
 
@@ -301,6 +303,7 @@ void StartFlightTask(void *argument)
     uint32_t imu_fail_streak  = 0;
     float    mag_ref_ut       = 0.0f;
     uint32_t mag_ref_n        = 0;
+    static gnss_fix_t last_gnss;   /* static: keeps the task stack small */
     bool     calib_reported   = false;
 
     USB_PRINTF("Gravity calibration starting (%d samples = %.0f s)...\r\n",
@@ -508,47 +511,54 @@ void StartFlightTask(void *argument)
 
         if (do_log)
         {
-            /* Overwrite unconditionally: a stalled SD task must not stop packing. */
+            log_record_t rec = {0};
+            rec.tick_ms      = osKernelGetTickCount();
+            rec.flight_state = (uint8_t)g_sm.state;
+            rec.ctrl_phase   = (uint8_t)g_rc.phase;
+            rec.ctrl_arm     = (uint8_t)g_arm.state;
+            const iim42653_sample_t *imu = &flight_data.imu_sample;
+            rec.flags = (uint8_t)((imu->accel_clipped   ? LOG_FLAG_ACCEL_CLIPPED  : 0u) |
+                                  (imu->gyro_clipped[0] ? LOG_FLAG_GYRO_CLIPPED_X : 0u) |
+                                  (imu->gyro_clipped[1] ? LOG_FLAG_GYRO_CLIPPED_Y : 0u) |
+                                  (imu->gyro_clipped[2] ? LOG_FLAG_GYRO_CLIPPED_Z : 0u) |
+                                  (g_est.rate_fresh     ? LOG_FLAG_RATE_FRESH     : 0u) |
+                                  (last_gnss.fix_valid  ? LOG_FLAG_GNSS_FIX       : 0u));
             for (int i = 0; i < 3; i++) {
-                g_log.pos[i]       = g_est.pos[i];
-                g_log.vel[i]       = g_est.vel[i];
-                g_log.acc[i]       = g_est.acc[i];
-                g_log.ang_vel[i]   = g_est.ang_vel[i];
-                /* Logged before the axis remap: the mounting is the one thing a
-                 * flight log cannot re-derive if the remap itself is wrong. */
-                g_log.accel_raw[i] = flight_data.imu_sample.accel_raw_mps2[i];
-                g_log.gyro_raw[i]  = flight_data.imu_sample.gyro_raw_rads[i];
-                g_log.mag_raw[i]   = flight_data.mag_sample.field_raw_ut[i];
+                rec.pos_m[i]        = g_est.pos[i];
+                rec.vel_mps[i]      = g_est.vel[i];
+                rec.acc_mps2[i]     = g_est.acc[i];
+                rec.ang_vel_rads[i] = g_est.ang_vel[i];
+                /* Before the axis remap: the one thing a log cannot re-derive if the remap is wrong. */
+                rec.accel_raw_mps2[i] = imu->accel_raw_mps2[i];
+                rec.gyro_raw_rads[i]  = imu->gyro_raw_rads[i];
+                rec.mag_raw_ut[i]     = flight_data.mag_sample.field_raw_ut[i];
             }
-            attitude_euler(&g_est, g_log.ang_pos);
-            g_log.baro_alt     = flight_data.baro_sample.altitude_m;
-            g_log.baro_press   = flight_data.baro_sample.pressure_pa;
-            g_log.baro_temp    = flight_data.baro_sample.temperature_c;
-            g_log.flight_state = (uint8_t)g_sm.state;
-            g_log.ctrl_phase      = (uint8_t)g_rc.phase;
-            g_log.ctrl_arm        = (uint8_t)g_arm.state;
-            g_log.ctrl_theta_sp   = g_rc.theta_sp;
-            g_log.ctrl_rate_sp    = g_rc.rate_sp;
-            g_log.ctrl_theta_meas = g_rc.theta_meas;
-            g_log.ctrl_canard_cmd = delta_rad;
-            g_log.ctrl_canard_us  = servo_bank_t75_current_pulse_us(&g_servos, 0);
-            g_log.timestamp_ms = osKernelGetTickCount();
+            float eul[3];
+            attitude_euler(&g_est, eul);
+            memcpy(rec.eul_rad, eul, sizeof eul);
+            rec.roll_twist_rad      = quat_twist_angle(g_est.q, k_roll_axis);
+            rec.baro_alt_m          = flight_data.baro_sample.altitude_m;
+            rec.baro_press_pa       = flight_data.baro_sample.pressure_pa;
+            rec.baro_temp_c         = flight_data.baro_sample.temperature_c;
+            rec.ctrl_theta_sp_rad   = g_rc.theta_sp;
+            rec.ctrl_rate_sp_rads   = g_rc.rate_sp;
+            rec.ctrl_theta_meas_rad = g_rc.theta_meas;
+            rec.ctrl_canard_cmd_rad = delta_rad;
+            rec.ctrl_canard_us      = servo_bank_t75_current_pulse_us(&g_servos, 0);
+            rec.false_launch_count  = (uint8_t)(g_sm.false_launch_count > 255u ? 255u
+                                                                                : g_sm.false_launch_count);
+            rec.gyro_bias_n         = g_est.gyro_bias_n;
 
-            /* GNSS snapshot for the CSV row (non-blocking; skip if contended). */
-            gnss_fix_t gnss;
-            if (gnss_get_fix(&gnss))
-            {
-                g_log.gnss_fix_valid = gnss.fix_valid;
-                g_log.gnss_num_sv    = gnss.pvt.num_sv;
-                g_log.gnss_lat_1e7   = gnss.pvt.lat_1e7;
-                g_log.gnss_lon_1e7   = gnss.pvt.lon_1e7;
-                g_log.gnss_h_msl_mm  = gnss.pvt.h_msl_mm;
-                memcpy(g_log.gnss_ned_m, gnss.ned_m, sizeof(g_log.gnss_ned_m));
-                memcpy(g_log.gnss_vel_ned_mps, gnss.pvt.vel_ned_mps,
-                       sizeof(g_log.gnss_vel_ned_mps));
-            }
+            /* Non-blocking; a contended read keeps the previous snapshot. */
+            (void)gnss_get_fix(&last_gnss);
+            rec.gnss_num_sv   = last_gnss.pvt.num_sv;
+            rec.gnss_lat_1e7  = last_gnss.pvt.lat_1e7;
+            rec.gnss_lon_1e7  = last_gnss.pvt.lon_1e7;
+            rec.gnss_h_msl_mm = last_gnss.pvt.h_msl_mm;
+            memcpy(rec.gnss_ned_m, last_gnss.ned_m, sizeof rec.gnss_ned_m);
+            memcpy(rec.gnss_vel_ned_mps, last_gnss.pvt.vel_ned_mps, sizeof rec.gnss_vel_ned_mps);
 
-            xTaskNotify((TaskHandle_t)sdTaskHandle, 0x01, eSetBits);
+            log_publish(&rec);
         }
 
         /* -- 8. Telemetry -------------------------------------------------- */
@@ -582,6 +592,10 @@ void StartFlightTask(void *argument)
             loop_counter > 0 && loop_counter % STANDBY_RESET_INTERVAL == 0)
         {
             attitude_reset(&g_est);
+            uint32_t log_dropped, log_errors;
+            log_stats(&log_dropped, &log_errors);
+            USB_PRINTF("[LOG] dropped=%lu errors=%lu\r\n",
+                       (unsigned long)log_dropped, (unsigned long)log_errors);
             USB_PRINTF("[RESET] Standby drift reset | BaroAlt=%.1f m  AccBias=[%.3f,%.3f,%.3f]"
                        "  GyroBias=[%.4f,%.4f,%.4f] deg/s n=%lu still=%.1f s\r\n",
                        flight_data.baro_sample.altitude_m,

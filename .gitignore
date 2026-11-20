@@ -1,3 +1,4 @@
 build/
 *:Zone.Identifier
 .mxproject
+__pycache__/
