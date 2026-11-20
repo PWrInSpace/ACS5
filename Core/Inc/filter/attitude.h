@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "control/quat.h"
 #include "filter/mahony.h"
@@ -16,6 +17,9 @@ typedef struct
     int   n_avg;            /* accel ring length (capped by ATTITUDE_N_AVG) */
     int   n_calib;          /* pad gravity samples before seeding quat */
     bool  require_calib;    /* flight: true; host tests may set false */
+    float gyro_bias_tau_s;  /* pad gyro-bias averaging time constant */
+    float gyro_bias_gate_rads; /* samples further than this from the bias are
+                                * motion, not bias, and are skipped */
 } attitude_config_t;
 
 attitude_config_t attitude_config_default(void);
@@ -82,6 +86,9 @@ typedef struct
 
     mahony_t mahony;          /* attitude backend state (Mahony today) */
     float  acc_bias_w[3];
+    /* Learned on the pad (zupt_active), frozen after: in flight the vertical is gyro-only. */
+    float  gyro_bias[3];
+    uint32_t gyro_bias_n;     /* samples averaged so far, saturating */
     float  prev_baro_alt;
 } attitude_t;
 
