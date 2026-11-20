@@ -65,6 +65,9 @@ static void halt_forever(const char *msg)
 #define LOG_INTERVAL_STANDBY   SEC_TO_TICKS(0.24f)   /* lowered for bench testing */
 #define STANDBY_RESET_INTERVAL SEC_TO_TICKS(24.0f)
 #define TELEMETRY_INTERVAL     HZ_TO_TICKS(12.5f)
+/* A brown-out of the IMU alone powers its sensors off; reads then fail forever. */
+#define IMU_REINIT_AFTER       SEC_TO_TICKS(0.1f)
+#define IMU_REINIT_EVERY       SEC_TO_TICKS(1.0f)
 
 /* Five times the worst legitimate gap between publishes: pressure lands on
  * every poll except the one cycle in MS5611_TEMP_EVERY_N spent on temperature,
@@ -135,6 +138,13 @@ static void print_attitude_deg(const float euler_rad[3])
 }
 
 
+/* One full IMU bring-up: soft reset, ID check, configuration, sensors on. */
+static bool imu_bring_up(const iim42653_config_t *cfg)
+{
+    return iim42653_init(&g_imu, &hspi2, IMU_CS_GPIO_Port, IMU_CS_Pin) &&
+           iim42653_configure(&g_imu, cfg);
+}
+
 /* IMU is mandatory and halts on failure; baro and mag only report. */
 static void sensors_init(void)
 {
@@ -152,15 +162,12 @@ static void sensors_init(void)
     bool imu_up = false;
     for (int attempt = 1; attempt <= 3 && !imu_up; attempt++)
     {
-        if (!iim42653_init(&g_imu, &hspi2, IMU_CS_GPIO_Port, IMU_CS_Pin))
-            USB_PRINTF("[ERROR] IMU init FAILED (attempt %d/3)\r\n", attempt);
-        else if (!iim42653_configure(&g_imu, &imu_cfg))
-            USB_PRINTF("[ERROR] IMU configure FAILED (attempt %d/3)\r\n", attempt);
-        else
-            imu_up = true;
-
+        imu_up = imu_bring_up(&imu_cfg);
         if (!imu_up)
+        {
+            USB_PRINTF("[ERROR] IMU bring-up FAILED (attempt %d/3)\r\n", attempt);
             vTaskDelay(pdMS_TO_TICKS(100));
+        }
     }
     if (!imu_up)
         halt_forever("IMU dead - control loop not started");
@@ -293,6 +300,14 @@ void StartFlightTask(void *argument)
             if (imu_fail_streak == 1u || imu_fail_streak % SEC_TO_TICKS(1.0f) == 0u)
                 USB_PRINTF("[WARN] IMU read failed (streak %lu)\r\n",
                            (unsigned long)imu_fail_streak);
+            if (imu_fail_streak >= IMU_REINIT_AFTER &&
+                (imu_fail_streak - IMU_REINIT_AFTER) % IMU_REINIT_EVERY == 0u)
+            {
+                iim42653_config_t imu_cfg = iim42653_config_rocket_default();
+                imu_cfg.axes = BOARD_IMU_REMAP;
+                bool ok = imu_bring_up(&imu_cfg);
+                USB_PRINTF("[WARN] IMU re-init %s\r\n", ok ? "OK" : "FAILED");
+            }
         }
         else
         {

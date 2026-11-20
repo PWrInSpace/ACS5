@@ -43,12 +43,11 @@ static bool    configure_interface(iim42653_t *self);
 static bool    configure_odr_fsr(iim42653_t *self, const iim42653_config_t *cfg);
 static bool    configure_ui_filters(iim42653_t *self, const iim42653_config_t *cfg);
 static bool    configure_aaf(iim42653_t *self, const iim42653_config_t *cfg);
-static bool    configure_notch_filter(iim42653_t *self, const iim42653_config_t *cfg);
-static bool    configure_interrupts(iim42653_t *self, const iim42653_config_t *cfg);
+static bool    enable_factory_notch(iim42653_t *self);
+static bool    configure_interrupts(iim42653_t *self);
 static bool    bypass_fifo(iim42653_t *self);
 
 static bool    iim42653_aaf_bw_is_enabled(const iim42653_aaf_bw_t *aaf);
-static bool    iim42653_gyro_notch_is_enabled(const iim42653_gyro_notch_config_t *notch);
 
 /* -------------------------------------------------------------------------
  * Write-or-fail macros
@@ -121,11 +120,6 @@ static bool iim42653_aaf_bw_is_enabled(const iim42653_aaf_bw_t *aaf)
     return aaf->delt != 0;
 }
 
-static bool iim42653_gyro_notch_is_enabled(const iim42653_gyro_notch_config_t *notch)
-{
-    return notch->freq_hz >= 1000.0f && notch->freq_hz <= 3000.0f;
-}
-
 /* -------------------------------------------------------------------------
  * Config factories
  * ------------------------------------------------------------------------- */
@@ -153,10 +147,8 @@ iim42653_config_t iim42653_config_rocket_default(void)
         .temp_filter_bw     = IIM42653_TEMP_FILTER_BW_HZ_40,
         .gyro_aaf           = AAF_BW_536,
         .accel_aaf          = AAF_BW_536,
-        .gyro_notch         = {2500.0f, IIM42653_NOTCH_BW_HZ_329},
         /* The board, not the driver, knows how the package is mounted. */
         .axes               = AXES_REMAP_UNSET,
-        .enable_drdy_int1   = true,
     };
     return cfg;
 }
@@ -249,6 +241,12 @@ static bool has_invalid(const int16_t data[3])
     return data[0] == INVALID_RAW || data[1] == INVALID_RAW || data[2] == INVALID_RAW;
 }
 
+/* With invalid-code insertion (INTF_CONFIG0 bit 7 = 0) a valid sample spans -32766..+32767. */
+static bool at_full_scale(int16_t v)
+{
+    return v >= 32767 || v <= -32766;
+}
+
 static void convert_inertial(const iim42653_t *self, const int16_t accel[3],
                              const int16_t gyro[3], iim42653_sample_t *sample)
 {
@@ -275,8 +273,10 @@ bool iim42653_init(iim42653_t *self, SPI_HandleTypeDef *spi,
     self->error_count  = 0U;
 
     printf("IMU: Sending Soft Reset...\r\n");
-    // If this fails, your SPI write function is broken
-    if (!spi_dev_write_reg(&self->dev, IIM42653_REG_DEVICE_CONFIG, IIM42653_REG_SOFT_RESET_EN))
+    /* An MCU-only reset can leave the IMU in another bank, where 0x11 is a
+     * factory notch trim instead of DEVICE_CONFIG. REG_BANK_SEL is in every bank. */
+    if (!spi_dev_write_reg(&self->dev, IIM42653_REG_REG_BANK_SEL, 0U) ||
+        !spi_dev_write_reg(&self->dev, IIM42653_REG_DEVICE_CONFIG, IIM42653_REG_SOFT_RESET_EN))
     {
         printf("IMU: SPI write FAILED during reset!\r\n");
         return false;
@@ -365,9 +365,9 @@ bool iim42653_configure(iim42653_t *self, const iim42653_config_t *cfg)
     if (!configure_odr_fsr(self, cfg))      return false;
     if (!configure_ui_filters(self, cfg))   return false;
     if (!configure_aaf(self, cfg))          return false;
-    if (!configure_notch_filter(self, cfg)) return false;
+    if (!enable_factory_notch(self))        return false;
     if (!bypass_fifo(self))                 return false;
-    if (!configure_interrupts(self, cfg))   return false;
+    if (!configure_interrupts(self))        return false;
 
     IMU_TRY(spi_dev_write_reg(&self->dev, IIM42653_REG_PWR_MGMT0, IIM42653_REG_PWR_GYRO_ACCEL_LN));
     vTaskDelay(pdMS_TO_TICKS(50U));
@@ -452,72 +452,21 @@ static bool configure_aaf(iim42653_t *self, const iim42653_config_t *cfg)
     return true;
 }
 
-static bool configure_notch_filter(iim42653_t *self, const iim42653_config_t *cfg)
+/* The notch coefficients are factory-trimmed per axis to each sense resonance;
+ * only make sure the filter is on. */
+static bool enable_factory_notch(iim42653_t *self)
 {
-    if (!iim42653_gyro_notch_is_enabled(&cfg->gyro_notch))
-    {
-        IMU_TRY(modify_bank_reg(self, 1U, IIM42653_REG_GYRO_CONFIG_STATIC2,
-                                0x00U, IIM42653_REG_GYRO_NF_DIS));
-        return true;
-    }
-
-    const float f_khz = cfg->gyro_notch.freq_hz / 1000.0f;
-    const float coswz = cosf(2.0f * PI_F * f_khz / 8.0f);
-
-    uint8_t nf_coswz_sel;
-    int16_t nf_coswz_raw;
-
-    if (fabsf(coswz) <= 0.875f)
-    {
-        nf_coswz_sel = 0U;
-        nf_coswz_raw = (int16_t)lroundf(coswz * 256.0f);
-    }
-    else
-    {
-        nf_coswz_sel = 1U;
-        if (coswz > 0.875f)
-        {
-            nf_coswz_raw = (int16_t)lroundf(8.0f * (1.0f - coswz) * 256.0f);
-        }
-        else
-        {
-            nf_coswz_raw = (int16_t)lroundf(-8.0f * (1.0f + coswz) * 256.0f);
-        }
-    }
-
-    const uint16_t coswz_u9  = (uint16_t)(nf_coswz_raw & 0x01FF);
-    const uint8_t  coswz_low = (uint8_t)(coswz_u9 & 0xFFU);
-    const uint8_t  coswz_hi  = (uint8_t)((coswz_u9 >> 8U) & 0x01U);
-
-    const uint8_t static9 =
-        (uint8_t)((coswz_hi << 0U) | (coswz_hi << 1U) | (coswz_hi << 2U)
-                  | (nf_coswz_sel << 3U) | (nf_coswz_sel << 4U) | (nf_coswz_sel << 5U));
-
-    IMU_TRY(select_bank(self, 1U));
-
-    IMU_TRY_BANK(spi_dev_write_reg(&self->dev, IIM42653_REG_GYRO_CONFIG_STATIC6, coswz_low));
-    IMU_TRY_BANK(spi_dev_write_reg(&self->dev, IIM42653_REG_GYRO_CONFIG_STATIC7, coswz_low));
-    IMU_TRY_BANK(spi_dev_write_reg(&self->dev, IIM42653_REG_GYRO_CONFIG_STATIC8, coswz_low));
-    IMU_TRY_BANK(spi_dev_write_reg(&self->dev, IIM42653_REG_GYRO_CONFIG_STATIC9, static9));
-    IMU_TRY_BANK(modify_reg(self, IIM42653_REG_GYRO_CONFIG_STATIC10,
-                            IIM42653_REG_NF_BW_SEL_MASK,
-                            (uint8_t)((uint8_t)cfg->gyro_notch.bw << 4U)));
-    IMU_TRY_BANK(modify_reg(self, IIM42653_REG_GYRO_CONFIG_STATIC2,
+    IMU_TRY(modify_bank_reg(self, 1U, IIM42653_REG_GYRO_CONFIG_STATIC2,
                             IIM42653_REG_GYRO_NF_DIS, 0x00U));
-    (void)select_bank(self, 0);
-
     return true;
 }
 
-static bool configure_interrupts(iim42653_t *self, const iim42653_config_t *cfg)
+/* DATA_RDY must clear on the status read, not on the data read: the burst reads
+ * the data registers before INT_STATUS. */
+static bool configure_interrupts(iim42653_t *self)
 {
-    if (!cfg->enable_drdy_int1)
-    {
-        return true;
-    }
-
     IMU_TRY(spi_dev_write_reg(&self->dev, IIM42653_REG_INT_CONFIG, IIM42653_REG_INT_ACTIVE_HIGH_PP_PULSE));
-    IMU_TRY(spi_dev_write_reg(&self->dev, IIM42653_REG_INT_CONFIG0, IIM42653_REG_INT_CFG0_DRDY_MODE));
+    IMU_TRY(spi_dev_write_reg(&self->dev, IIM42653_REG_INT_CONFIG0, IIM42653_REG_INT_CFG0_DRDY_CLEAR_ON_STATUS));
     IMU_TRY(spi_dev_write_reg(&self->dev, IIM42653_REG_INT_SOURCE0, IIM42653_REG_UI_DRDY_INT1_EN));
 
     return true;
@@ -559,12 +508,21 @@ bool iim42653_read(iim42653_t *self, iim42653_sample_t *sample)
         parse_be16(&buf[8]), parse_be16(&buf[10]), parse_be16(&buf[12])
     };
 
+    if ((buf[16] & IIM42653_REG_DATA_RDY_INT) == 0U)
+    {
+        return false;   /* no new sample: the IMU has stalled or reset */
+    }
+
     if (has_invalid(raw_accel) || has_invalid(raw_gyro))
     {
         return false;
     }
 
     convert_inertial(self, raw_accel, raw_gyro, sample);
+    sample->accel_clipped = at_full_scale(raw_accel[0]) || at_full_scale(raw_accel[1]) ||
+                            at_full_scale(raw_accel[2]);
+    for (int i = 0; i < 3; ++i)
+        sample->gyro_clipped[i] = at_full_scale(raw_gyro[i]);
 
     /* Stamped only once the sample is accepted, so the timestamp never
      * advertises held data as fresh. */

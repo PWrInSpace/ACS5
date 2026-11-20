@@ -9,7 +9,7 @@
 
 /* The IMU's 14-byte temperature + accel + gyro block, the longest burst any
  * sensor here asks for. Transfer buffers hold this plus the address byte. */
-#define SPI_DEV_MAX_BURST 14U
+#define SPI_DEV_MAX_BURST 17U
 
 /* One software-CS slave. All three sensors share hspi2 and are driven from the
  * flight task alone, so transfers need no lock; adding a second caller

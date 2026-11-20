@@ -46,7 +46,7 @@ void MX_SPI2_Init(void)
   hspi2.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
   hspi2.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
   hspi2.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-  hspi2.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi2.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_ENABLE;
   hspi2.Init.IOSwap = SPI_IO_SWAP_ENABLE;
   if (HAL_SPI_Init(&hspi2) != HAL_OK)
   {
@@ -90,7 +90,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* spiHandle)
     GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
     GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
