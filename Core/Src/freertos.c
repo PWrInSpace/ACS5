@@ -113,7 +113,7 @@ void MX_FREERTOS_Init(void) {
   gnssTaskHandle = osThreadNew(gnss_task, NULL, &gnssTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  if (!gnss_init(&huart7))
+  if (!gnss_init(&huart9))
     Error_Handler();
   /* USER CODE END RTOS_THREADS */
 

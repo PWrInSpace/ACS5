@@ -88,6 +88,8 @@ static const uint32_t s_boot_bauds[] = {9600u, 38400u};
 
 /* ------------------------------------------------------------------ DMA buffer */
 
+/* Read by the CPU with no cache maintenance: the D-cache is off, and enabling it
+ * needs a non-cacheable MPU region over .dma_buf. */
 static uint8_t s_dma_buf[MAX_M10S_DMA_BUF_LEN] ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
 
 /* Index the DMA will write next. NDTR counts down from the buffer length and
@@ -103,6 +105,16 @@ static uint16_t dma_write_pos(const max_m10s_driver_t *drv)
 /* Starts circular receive-to-idle DMA into the ring buffer. */
 static bool start_rx_dma(const max_m10s_driver_t *drv)
 {
+    /* Bytes that arrived while nothing was receiving leave an overrun pending.
+     * The HAL enables the error interrupt before the DMA request, so that
+     * pending error aborts the reception but leaves the stream BUSY, and every
+     * later start fails. Stop the stream and clear the flags first. */
+    if (drv->huart->hdmarx->State != HAL_DMA_STATE_READY)
+        (void)HAL_DMA_Abort(drv->huart->hdmarx);
+    __HAL_UART_SEND_REQ(drv->huart, UART_RXDATA_FLUSH_REQUEST);
+    __HAL_UART_CLEAR_FLAG(drv->huart, UART_CLEAR_OREF | UART_CLEAR_NEF |
+                                      UART_CLEAR_FEF | UART_CLEAR_PEF);
+
     if (HAL_UARTEx_ReceiveToIdle_DMA(drv->huart, s_dma_buf,
                                      MAX_M10S_DMA_BUF_LEN) != HAL_OK)
         return false;
@@ -113,31 +125,12 @@ static bool start_rx_dma(const max_m10s_driver_t *drv)
 }
 
 /* Drops cached copies of the ring bytes in [from, to), which may wrap.*/
-static void invalidate_ring(uint16_t from, uint16_t to)
-{
-    if (from == to)
-        return;
-
-    if (from < to)
-    {
-        SCB_InvalidateDCache_by_Addr((uint32_t *)&s_dma_buf[from], to - from);
-        return;
-    }
-
-    SCB_InvalidateDCache_by_Addr((uint32_t *)&s_dma_buf[from],
-                                 MAX_M10S_DMA_BUF_LEN - from);
-    if (to > 0u)
-        SCB_InvalidateDCache_by_Addr((uint32_t *)s_dma_buf, to);
-}
-
 /* Feeds ring bytes from *read_pos up to write_pos to the parser. Stops and
  * returns true at the first complete frame, with *read_pos just past it;
  * returns false once write_pos is reached.
  */
 static bool ring_feed(ubx_parser_t *parser, uint16_t *read_pos, uint16_t write_pos)
 {
-    invalidate_ring(*read_pos, write_pos);
-
     while (*read_pos != write_pos)
     {
         const uint8_t b = s_dma_buf[*read_pos];
@@ -197,6 +190,10 @@ static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
 
     for (uint8_t attempt = 0; attempt < attempts; attempt++)
     {
+        /* A receive error (e.g. a garbled byte around a baud change) stops the DMA. */
+        if (drv->huart->RxState != HAL_UART_STATE_BUSY_RX && !start_rx_dma(drv))
+            return MAX_M10S_ERR_HAL;
+
         if (HAL_UART_Transmit(drv->huart, frame, frame_len,
                               MAX_M10S_TX_TIMEOUT_MS) != HAL_OK)
             return MAX_M10S_ERR_HAL;

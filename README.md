@@ -13,7 +13,7 @@ the MAX-M10S GNSS driver already developed for ACS5.
 | SD detect | PC0 | **PD1** |
 | LEDs | PA1/2/3 | **PA8 / PA4** |
 | Buzzer | PE5 TIM15 | PE5 TIM15 (unchanged) |
-| GNSS | — | **UART7 PE8 TX / PE7 RX** |
+| GNSS | — | **UART9 PD15 TX / PD14 RX** (on-board MAX-M10S) |
 | Cameras | — | **PC0/PC1/PC2 MOSFET HIGH = on** |
 | Servos / lock | TIM4 / TIM1 | **TIM3 CH1–4** (PA6/PA7/PB0/PB1 = J4 CH5..CH2) / **TIM2_CH1** (PA5 = J4 CH6) |
 
@@ -48,7 +48,6 @@ Procedure: `docs/bench/servo_bench.md`.
 
 ## GNSS note
 
-The Meteor schematic labels a board port `TX6/RX6` on PE8/PE7; those pads are
-UART7 in the H725 alternate-function table. PD14/PD15 are also labeled
-`TX4/RX4` near the GPS sheet but have no UART TX/RX AF — firmware uses UART7.
-Confirm on the harness before flight.
+The on-board MAX-M10S TXD/RXD (GPS sheet nets `TX4/RX4`) reach PD14/PD15,
+UART9 AF11 on the H725. `TX6/RX6` on PE7/PE8 (UART7) go to the external `UART6`
+port and are not configured.

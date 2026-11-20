@@ -107,7 +107,7 @@ int main(void)
   MX_GPIO_Init();
   MX_DMA_Init();
   MX_SPI2_Init();
-  MX_UART7_Init();
+  MX_UART9_Init();
   MX_TIM3_Init();
   MX_FATFS_Init();
   MX_TIM2_Init();

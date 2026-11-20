@@ -34,8 +34,8 @@ keeps the RTOS objects and the published data.
     module (next section). Safe to call again after a failure.
   - `max_m10s_drain(drv, &frame)` — non-blocking; feeds new ring bytes to the
     parser and returns the next complete frame (`class`, `id`, `len`, `payload`),
-    call it until it returns `false`. It invalidates the D-cache over just the
-    bytes it is about to read.
+    call it until it returns `false`. There is no cache maintenance: the D-cache
+    is off, and enabling it needs a non-cacheable MPU region over `.dma_buf`.
   - `max_m10s_on_uart_error(drv)` — see "UART errors".
   - `max_m10s_get_stats(drv, &stats)` — parser counters plus UART overruns and
     other receive errors.
@@ -70,7 +70,7 @@ UART and restarts the DMA, checking each return value.
 The task is set up in two steps in `freertos.c`, before the kernel starts:
 
 ```c
-if (!gnss_init(&huart7))       /* creates the mutex and semaphore, remembers the UART */
+if (!gnss_init(&huart9))       /* creates the mutex and semaphore, remembers the UART */
     Error_Handler();
 gnssTaskHandle = osThreadNew(gnss_task, NULL, &gnssTask_attributes);
 ```

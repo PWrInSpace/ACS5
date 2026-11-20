@@ -57,8 +57,8 @@
 /* External variables --------------------------------------------------------*/
 extern PCD_HandleTypeDef hpcd_USB_OTG_HS;
 extern SD_HandleTypeDef hsd1;
-extern DMA_HandleTypeDef hdma_uart7_rx;
-extern UART_HandleTypeDef huart7;
+extern DMA_HandleTypeDef hdma_uart9_rx;
+extern UART_HandleTypeDef huart9;
 extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
@@ -171,7 +171,7 @@ void DMA1_Stream0_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
 
   /* USER CODE END DMA1_Stream0_IRQn 0 */
-  HAL_DMA_IRQHandler(&hdma_uart7_rx);
+  HAL_DMA_IRQHandler(&hdma_uart9_rx);
   /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
 
   /* USER CODE END DMA1_Stream0_IRQn 1 */
@@ -220,17 +220,17 @@ void OTG_HS_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles UART7 global interrupt.
+  * @brief This function handles UART9 global interrupt.
   */
-void UART7_IRQHandler(void)
+void UART9_IRQHandler(void)
 {
-  /* USER CODE BEGIN UART7_IRQn 0 */
+  /* USER CODE BEGIN UART9_IRQn 0 */
 
-  /* USER CODE END UART7_IRQn 0 */
-  HAL_UART_IRQHandler(&huart7);
-  /* USER CODE BEGIN UART7_IRQn 1 */
+  /* USER CODE END UART9_IRQn 0 */
+  HAL_UART_IRQHandler(&huart9);
+  /* USER CODE BEGIN UART9_IRQn 1 */
 
-  /* USER CODE END UART7_IRQn 1 */
+  /* USER CODE END UART9_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
