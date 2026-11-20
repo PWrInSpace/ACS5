@@ -21,6 +21,11 @@ flight_sm_config_t flight_sm_config_default(void)
         .baro_vel_tau_s     = 0.34f,
         .baro_vel_min_span_s = 0.05f,
         .post_falling_timeout_ticks = SEC_TO_TICKS(240.0f),
+        /* Placeholders until the airframe's burnout-to-apogee time is known. */
+        .max_coast_ticks       = SEC_TO_TICKS(20.0f),
+        .launch_confirm_ticks  = SEC_TO_TICKS(1.0f),
+        .launch_confirm_baro_m = 10.0f,
+        .launch_confirm_imu_m  = 1.5f,
     };
 }
 
@@ -94,19 +99,47 @@ bool flight_sm_step(flight_sm_t *sm, const flight_sm_input_t *in)
     switch (sm->state)
     {
         case FLIGHT_STATE_STANDBY:
+            if (in->baro_fresh && isfinite(in->baro_alt_m)) {
+                sm->pad_baro_alt   = in->baro_alt_m;
+                sm->pad_baro_valid = true;
+            }
             if (in->az_mps2 > c->launch_accel_mps2) {
                 if (++sm->launch_count >= c->launch_debounce) {
-                    sm->state        = FLIGHT_STATE_ACCELERATION;
-                    sm->launch_count = 0;
+                    sm->state           = FLIGHT_STATE_ACCELERATION;
+                    sm->launch_count    = 0;
+                    sm->launch_tick     = sm->tick;
+                    sm->boost_baro_seen = false;
+                    sm->boost_baro_max  = sm->pad_baro_alt;
+                    sm->boost_imu_v     = 0.0f;
+                    sm->boost_imu_h     = 0.0f;
                 }
             } else sm->launch_count = 0;
             break;
 
         case FLIGHT_STATE_ACCELERATION:
+            sm->boost_imu_v += (in->az_mps2 - GRAVITY) * CONTROL_DT_S;
+            sm->boost_imu_h += sm->boost_imu_v * CONTROL_DT_S;
+            if (in->baro_fresh && isfinite(in->baro_alt_m)) {
+                sm->boost_baro_seen = true;
+                if (in->baro_alt_m > sm->boost_baro_max) sm->boost_baro_max = in->baro_alt_m;
+            }
+            /* Without baro on both sides of the launch there is no evidence
+             * against it, and undoing a real launch is the worse error. */
+            if (sm->tick - sm->launch_tick == c->launch_confirm_ticks &&
+                sm->pad_baro_valid && sm->boost_baro_seen &&
+                sm->boost_baro_max - sm->pad_baro_alt < c->launch_confirm_baro_m &&
+                sm->boost_imu_h < c->launch_confirm_imu_m) {
+                sm->state         = FLIGHT_STATE_STANDBY;
+                sm->burnout_count = 0;
+                sm->false_launch_count++;
+                break;
+            }
             if (in->az_mps2 <= c->burnout_accel_mps2) {
                 if (++sm->burnout_count >= c->burnout_debounce) {
                     sm->state           = FLIGHT_STATE_FREE_FLIGHT;
                     sm->burnout_count   = 0;
+                    sm->coast_entry_tick = sm->tick;
+                    sm->baro_vel_z      = isfinite(in->vel_z_mps) ? in->vel_z_mps : 0.0f;
                     sm->peak_alt        = in->alt_m;
                     sm->prev_baro_alt   = in->baro_alt_m;
                     sm->baro_span_s     = 0.0f;
@@ -121,8 +154,9 @@ bool flight_sm_step(flight_sm_t *sm, const flight_sm_input_t *in)
         case FLIGHT_STATE_FREE_FLIGHT:
             if (in->alt_m > sm->peak_alt) sm->peak_alt = in->alt_m;
             update_baro_vel(sm, in);
-            if (sm->baro_vel_z < c->apogee_vel_mps &&
-                (sm->peak_alt - in->alt_m) > c->apogee_alt_drop_m) {
+            if ((sm->baro_vel_z < c->apogee_vel_mps &&
+                 (sm->peak_alt - in->alt_m) > c->apogee_alt_drop_m) ||
+                sm->tick - sm->coast_entry_tick >= c->max_coast_ticks) {
                 sm->state              = FLIGHT_STATE_FALLING;
                 sm->falling_entry_tick = sm->tick;
             }

@@ -98,6 +98,9 @@ typedef struct
     quat_t q;                /* current attitude (body->world) */
     bool   q_valid;          /* estimator gravity-init complete + finite */
     float  roll_rate_rads;   /* body-Z gyro, rad/s */
+    /* roll_rate_rads is a held value, not a measurement from this tick. Phrased
+     * as stale so a zeroed input struct reads as healthy. */
+    bool   rate_stale;
     /* Dynamic pressure, Pa. Zero or negative means the caller has none to
      * offer: scheduling off, scale 1, floor not applied. A zeroed input struct
      * must not silently stand the canards down. */

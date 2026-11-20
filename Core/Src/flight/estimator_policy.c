@@ -13,9 +13,17 @@ estimator_gates_t estimator_gates(flight_state_t state, bool calib_done)
     };
 }
 
-bool estimator_baro_vel_valid(flight_state_t state, bool baro_datum_set)
+bool estimator_baro_vel_valid(flight_state_t state, bool baro_datum_set, bool baro_recent)
 {
-    return (state != FLIGHT_STATE_STANDBY) || baro_datum_set;
+    if (!baro_recent) return false;
+    switch (state) {
+        /* On the pad flight_sm reports 0, which is the truth there. */
+        case FLIGHT_STATE_STANDBY:     return baro_datum_set;
+        case FLIGHT_STATE_FREE_FLIGHT:
+        case FLIGHT_STATE_FALLING:     return true;
+        /* flight_sm does not update baro_vel_z in boost or under the chute. */
+        default:                       return false;
+    }
 }
 
 bool baro_sample_fresh(uint32_t sample_us, uint32_t now_us, uint32_t max_age_us)

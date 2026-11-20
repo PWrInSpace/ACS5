@@ -210,7 +210,7 @@ float roll_ctrl_step(roll_ctrl_t *rc, const roll_ctrl_input_t *in)
     /* Gyro and attitude validity are separate concerns: a bad quaternion
      * ends the maneuver (there is no angle control without attitude), but
      * it must not blind the damper, which only ever needed the gyro. */
-    bool gyro_ok = isfinite(in->roll_rate_rads);
+    bool gyro_ok = isfinite(in->roll_rate_rads) && !in->rate_stale;
     bool att_ok  = in->q_valid && quat_finite(in->q);
 
     /* Scheduling on dynamic pressure. A non-positive qbar is the absence of a
@@ -302,6 +302,16 @@ float roll_ctrl_step(roll_ctrl_t *rc, const roll_ctrl_input_t *in)
      * much over a debounce window. p_prev is still 0 if the very first tick
      * faults. */
     float p = gyro_ok ? in->roll_rate_rads : rc->p_prev;
+
+    /* Damping on a frozen rate would drive the integrator to its clamp and hold
+     * the canards there open-loop; with nothing to damp on, go neutral. */
+    if (rc->phase == ROLL_CTRL_ABORT && !gyro_ok) {
+        rc->theta_sp = 0.0f;
+        rc->rate_sp  = 0.0f;
+        float max_step = c->deflection_slew_rads * c->dt_s;
+        rc->current_delta += clampf(0.0f - rc->current_delta, -max_step, max_step);
+        return rc->current_delta;
+    }
 
     switch (rc->phase)
     {

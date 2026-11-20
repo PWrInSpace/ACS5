@@ -18,7 +18,10 @@ attitude_config_t attitude_config_default(void)
         .n_calib         = (int)SEC_TO_TICKS(20.0f),
         .require_calib   = true,
         .gyro_bias_tau_s     = 5.0f,
-        .gyro_bias_gate_rads = 0.035f,   /* 2 deg/s */
+        .still_rate_max_rads = 5.0f * DEG2RAD,
+        .still_tilt_rad      = 0.1f * DEG2RAD,
+        .still_mag_tol       = 0.05f,
+        .still_time_s        = 3.0f,
     };
 }
 
@@ -33,6 +36,7 @@ void attitude_init(attitude_t *est, const attitude_config_t *cfg)
     est->q           = quat_identity();
     est->last_good_q = quat_identity();
     est->calib.mag_mean = GRAVITY;
+    est->still_need_ticks = (uint32_t)(est->cfg.still_time_s / est->cfg.dt_s + 0.5f);
     mahony_init(&est->mahony);
 }
 
@@ -99,14 +103,46 @@ void attitude_reset(attitude_t *est)
     /* Preserve quaternion, calib, gyro bias and mag reference (soft standby reset). */
 }
 
+/* True once the pad has been continuously still for still_time_s. Gravity
+ * direction catches slow tilts below any rate gate; the rate gate catches
+ * rotation about the vertical, which gravity cannot see. */
+static bool pad_is_still(attitude_t *est, const float gyro[3], const float acc[3])
+{
+    const attitude_config_t *c = &est->cfg;
+    const float g_ref = est->calib.done ? est->calib.mag_mean : GRAVITY;
+    const float mag   = sqrtf(acc[0]*acc[0] + acc[1]*acc[1] + acc[2]*acc[2]);
+
+    bool quiet = mag > 0.0f && fabsf(mag - g_ref) <= c->still_mag_tol * g_ref;
+    for (int i = 0; i < 3; i++)
+        quiet = quiet && fabsf(gyro[i]) <= c->still_rate_max_rads;
+
+    float u[3] = {0};
+    if (mag > 0.0f)
+        for (int i = 0; i < 3; i++) u[i] = acc[i] / mag;
+
+    if (quiet && est->still_anchor_valid) {
+        const float *a = est->still_anchor;
+        const float cx = u[1]*a[2] - u[2]*a[1];
+        const float cy = u[2]*a[0] - u[0]*a[2];
+        const float cz = u[0]*a[1] - u[1]*a[0];
+        quiet = (cx*cx + cy*cy + cz*cz) <= sinf(c->still_tilt_rad) * sinf(c->still_tilt_rad);
+    }
+
+    if (!quiet || !est->still_anchor_valid) {
+        for (int i = 0; i < 3; i++) est->still_anchor[i] = u[i];
+        est->still_anchor_valid = mag > 0.0f;
+        est->still_ticks = 0;
+        return false;
+    }
+    if (est->still_ticks < UINT32_MAX) est->still_ticks++;
+    return est->still_ticks >= est->still_need_ticks;
+}
+
 /* Running mean while few samples exist, then an EMA with gyro_bias_tau_s. */
-static void gyro_bias_update(attitude_t *est, const attitude_input_t *in)
+static void gyro_bias_update(attitude_t *est, const attitude_input_t *in, const float acc[3])
 {
     if (!in->zupt_active) return;
-    for (int i = 0; i < 3; i++)
-        if (fabsf(in->gyro_rads[i] - est->gyro_bias[i]) > est->cfg.gyro_bias_gate_rads &&
-            est->gyro_bias_n > 0u)
-            return;
+    if (!pad_is_still(est, in->gyro_rads, acc)) return;
 
     if (est->gyro_bias_n < UINT32_MAX) est->gyro_bias_n++;
     float alpha = fmaxf(1.0f / (float)est->gyro_bias_n,
@@ -123,6 +159,7 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     if (!isfinite(dt) || dt <= 0.0001f) return;
 
     if (!in->imu_valid) {
+        est->rate_fresh = false;
         est->imu_stale_ticks++;
         if ((float)est->imu_stale_ticks * dt > est->cfg.imu_max_stale_s)
             est->q_valid = false;
@@ -135,16 +172,6 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     float raw_ax = isfinite(in->accel_mps2[0]) ? in->accel_mps2[0] : est->last_good_acc_original[0];
     float raw_ay = isfinite(in->accel_mps2[1]) ? in->accel_mps2[1] : est->last_good_acc_original[1];
     float raw_az = isfinite(in->accel_mps2[2]) ? in->accel_mps2[2] : est->last_good_acc_original[2];
-
-    float gx, gy, gz;
-    if (isfinite(in->gyro_rads[0]) && isfinite(in->gyro_rads[1]) && isfinite(in->gyro_rads[2])) {
-        gyro_bias_update(est, in);
-        gx = in->gyro_rads[0] - est->gyro_bias[0];
-        gy = in->gyro_rads[1] - est->gyro_bias[1];
-        gz = in->gyro_rads[2] - est->gyro_bias[2];
-    } else {
-        gx = est->prev_gyro[0]; gy = est->prev_gyro[1]; gz = est->prev_gyro[2];
-    }
 
     float baro_alt = in->baro_alt_m;
     if (isfinite(baro_alt)) {
@@ -171,6 +198,18 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     est->acc_original[0] = avg[0];
     est->acc_original[1] = avg[1];
     est->acc_original[2] = avg[2];
+
+    float gx, gy, gz;
+    est->rate_fresh = isfinite(in->gyro_rads[0]) && isfinite(in->gyro_rads[1]) &&
+                      isfinite(in->gyro_rads[2]);
+    if (est->rate_fresh) {
+        gyro_bias_update(est, in, avg);
+        gx = in->gyro_rads[0] - est->gyro_bias[0];
+        gy = in->gyro_rads[1] - est->gyro_bias[1];
+        gz = in->gyro_rads[2] - est->gyro_bias[2];
+    } else {
+        gx = est->prev_gyro[0]; gy = est->prev_gyro[1]; gz = est->prev_gyro[2];
+    }
 
     if (in->collecting_calib)
         calib_push(est, avg);

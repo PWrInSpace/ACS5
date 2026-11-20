@@ -428,11 +428,83 @@ static void test_pad_bump_does_not_corrupt_gyro_bias(void)
     CHECK_NEAR(est.gyro_bias[0], (-0.0015f), 1e-4f);
 }
 
+/* Powered up while being carried: the first pad samples are motion, the bias must still converge once still. */
+static void test_gyro_bias_recovers_from_motion_at_power_up(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+
+    attitude_input_t in = level_input();
+    in.zupt_active  = true;
+    in.gyro_rads[0] = 0.2f;                          /* ~11 deg/s while carried */
+    for (int k = 0; k < EST_HZ / 2; k++) attitude_update(&est, &in);
+
+    in.gyro_rads[0] = -0.0015f;
+    for (int k = 0; k < 30 * EST_HZ; k++) attitude_update(&est, &in);
+
+    CHECK_NEAR(est.gyro_bias[0], -0.0015f, 1e-4f);
+}
+
+/* Raising the rail at 1.5 deg/s is real rotation below any rate gate; it must not be learned as bias. */
+static void test_slow_rail_raise_is_not_learned_as_bias(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+
+    const float bias_x = -0.0015f;
+    const float rate   = 1.5f * DEG2RAD;
+    attitude_input_t in = level_input();
+    in.zupt_active  = true;
+    in.gyro_rads[0] = bias_x;
+    for (int k = 0; k < 10 * EST_HZ; k++) attitude_update(&est, &in);
+
+    /* Rotate about body X: gravity in the body frame turns the other way. */
+    float angle = 0.0f, worst = 0.0f;
+    in.gyro_rads[0] = bias_x + rate;
+    for (int k = 0; k < 20 * EST_HZ; k++) {
+        angle += rate * CONTROL_DT_S;
+        in.accel_mps2[1] = GRAVITY * sinf(angle);
+        in.accel_mps2[2] = GRAVITY * cosf(angle);
+        attitude_update(&est, &in);
+        worst = fmaxf(worst, fabsf(est.gyro_bias[0] - bias_x));
+    }
+    CHECK_NEAR(worst, 0.0f, 0.1f * rate);
+}
+
+/* rate_fresh reports whether ang_vel was measured this tick. */
+static void test_rate_fresh_tracks_imu_validity(void)
+{
+    attitude_config_t cfg = attitude_config_default();
+    cfg.require_calib = false;
+    cfg.n_avg = 4;
+    attitude_t est;
+    attitude_init(&est, &cfg);
+    attitude_input_t in = level_input();
+    attitude_update(&est, &in);
+    CHECK(est.rate_fresh);
+
+    in.imu_valid = false;
+    attitude_update(&est, &in);
+    CHECK(!est.rate_fresh);
+
+    in.imu_valid = true;
+    in.gyro_rads[1] = NAN;
+    attitude_update(&est, &in);
+    CHECK(!est.rate_fresh);
+}
+
 int main(void)
 {
     test_gravity_init_level();
     test_pad_gyro_bias_is_removed_before_flight();
     test_pad_bump_does_not_corrupt_gyro_bias();
+    test_gyro_bias_recovers_from_motion_at_power_up();
+    test_slow_rail_raise_is_not_learned_as_bias();
+    test_rate_fresh_tracks_imu_validity();
     test_imu_stall_in_flight_recovers_validity();
     test_inhibited_corrections_leave_the_estimate_to_the_gyro();
     test_gyro_integration_90deg();

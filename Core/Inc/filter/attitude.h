@@ -18,8 +18,11 @@ typedef struct
     int   n_calib;          /* pad gravity samples before seeding quat */
     bool  require_calib;    /* flight: true; host tests may set false */
     float gyro_bias_tau_s;  /* pad gyro-bias averaging time constant */
-    float gyro_bias_gate_rads; /* samples further than this from the bias are
-                                * motion, not bias, and are skipped */
+    /* Pad stillness, required before the gyro bias learns: */
+    float still_rate_max_rads; /* |gyro| per axis below this */
+    float still_tilt_rad;      /* gravity direction within this of its anchor */
+    float still_mag_tol;       /* |accel| within this fraction of g */
+    float still_time_s;        /* ...continuously for this long */
 } attitude_config_t;
 
 attitude_config_t attitude_config_default(void);
@@ -67,6 +70,7 @@ typedef struct
     float  vel[3];
     float  pos[3];
     float  ang_vel[3];        /* body rates */
+    bool   rate_fresh;        /* ang_vel was measured this tick, not held */
 
     attitude_grav_calib_t calib;
 
@@ -84,9 +88,13 @@ typedef struct
 
     mahony_t mahony;          /* attitude backend state (Mahony today) */
     float  acc_bias_w[3];
-    /* Learned on the pad (zupt_active), frozen after: in flight the vertical is gyro-only. */
+    /* Learned on the pad while still, frozen after: in flight the vertical is gyro-only. */
     float  gyro_bias[3];
     uint32_t gyro_bias_n;     /* samples averaged so far, saturating */
+    float  still_anchor[3];   /* unit gravity direction where the still run began */
+    bool   still_anchor_valid;
+    uint32_t still_ticks;     /* consecutive still ticks, saturating */
+    uint32_t still_need_ticks;
 } attitude_t;
 
 void attitude_init(attitude_t *est, const attitude_config_t *cfg);

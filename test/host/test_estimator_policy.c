@@ -34,9 +34,23 @@ static void test_recovery_restores_corrections(void)
 
 static void test_baro_vel_needs_datum_on_pad(void)
 {
-    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_STANDBY, false));
-    CHECK(estimator_baro_vel_valid(FLIGHT_STATE_STANDBY, true));
-    CHECK(estimator_baro_vel_valid(FLIGHT_STATE_FREE_FLIGHT, false));
+    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_STANDBY, false, true));
+    CHECK(estimator_baro_vel_valid(FLIGHT_STATE_STANDBY, true, true));
+    CHECK(estimator_baro_vel_valid(FLIGHT_STATE_FREE_FLIGHT, false, true));
+    CHECK(estimator_baro_vel_valid(FLIGHT_STATE_FALLING, false, true));
+}
+
+/* flight_sm does not compute a baro velocity during boost or under the chute. */
+static void test_baro_vel_off_where_flight_sm_does_not_compute_it(void)
+{
+    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_ACCELERATION, true, true));
+    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_RECOVERY, true, true));
+}
+
+static void test_baro_vel_needs_recent_baro(void)
+{
+    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_FREE_FLIGHT, true, false));
+    CHECK(!estimator_baro_vel_valid(FLIGHT_STATE_STANDBY, true, false));
 }
 
 static void test_baro_freshness(void)
@@ -53,6 +67,8 @@ int main(void)
     test_flight_phases_inhibit_corrections();
     test_recovery_restores_corrections();
     test_baro_vel_needs_datum_on_pad();
+    test_baro_vel_off_where_flight_sm_does_not_compute_it();
+    test_baro_vel_needs_recent_baro();
     test_baro_freshness();
     return test_report("estimator_policy");
 }

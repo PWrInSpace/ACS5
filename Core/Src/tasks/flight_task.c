@@ -71,6 +71,8 @@ static void halt_forever(const char *msg)
  * which stretches that gap to two polls. Well inside the estimator's 0.5 s baro
  * blend constant, so a dead part is caught before it can drag pos Z. */
 #define BARO_MAX_AGE_US        100000u
+/* Horizon of flight_sm's baro velocity filter: past this its output is frozen. */
+#define BARO_VEL_MAX_AGE_US    500000u
 
 /* Rising C-major arpeggio, ~0.7 s. */
 static const BuzzerNote_t STARTUP_CHIME[] = {
@@ -346,10 +348,13 @@ void StartFlightTask(void *argument)
         est_in.zupt_active           = gates.zupt_active;
         est_in.baro_alt_m = flight_data.baro_sample.altitude_m;
         /* A dead barometer keeps its last finite sample; only the age reveals it. */
+        const uint32_t now_us = timestamp_us();
         est_in.baro_valid = baro_sample_fresh(flight_data.baro_sample.timestamp_us,
-                                              timestamp_us(), BARO_MAX_AGE_US);
+                                              now_us, BARO_MAX_AGE_US);
         est_in.baro_vel_z     = g_sm.baro_vel_z;
-        est_in.baro_vel_valid = estimator_baro_vel_valid(g_sm.state, baro_datum.set);
+        est_in.baro_vel_valid = estimator_baro_vel_valid(
+            g_sm.state, baro_datum.set,
+            baro_sample_fresh(flight_data.baro_sample.timestamp_us, now_us, BARO_VEL_MAX_AGE_US));
         attitude_update(&g_est, &est_in);
 
         if (g_est.calib.done && !calib_reported) {
@@ -365,16 +370,23 @@ void StartFlightTask(void *argument)
             .baro_alt_m = flight_data.baro_sample.altitude_m,
             .baro_fresh = baro_fresh,
             .baro_dt_s  = baro_dt_s,
+            .vel_z_mps  = g_est.vel[2],
         };
 
         if (flight_sm_step(&g_sm, &sm_in))
         {
+            /* Prints are off in flight; back on the pad they resume first so the
+             * transition line itself goes out. */
+            if (g_sm.state == FLIGHT_STATE_STANDBY)
+                print_flag = 1u;
+
             USB_PRINTF("[STATE] -> %s | Az=%.1f m/s2  Alt=%.1f m  BaroVelZ=%.2f m/s\r\n",
                        flight_state_name(g_sm.state), sm_in.az_mps2,
                        g_est.pos[2], g_sm.baro_vel_z);
+            if (g_sm.state == FLIGHT_STATE_STANDBY)
+                USB_PRINTF("[STATE] false launch #%lu - no climb on baro or IMU\r\n",
+                           (unsigned long)g_sm.false_launch_count);
 
-            /* Launch / leave pad: stop USB prints for the rest of the flight.
-             * Cleared after the transition line so that last message still goes out. */
             if (g_sm.state != FLIGHT_STATE_STANDBY)
                 print_flag = 0u;
 
@@ -415,6 +427,7 @@ void StartFlightTask(void *argument)
             .q                = g_est.q,
             .q_valid          = g_est.q_valid,
             .roll_rate_rads   = g_est.ang_vel[BODY_AXIS_ROLL],
+            .rate_stale       = !g_est.rate_fresh,
             .qbar_pa          = qbar_pa,
             .maneuver_enabled = maneuver_enabled,
         };
@@ -516,9 +529,13 @@ void StartFlightTask(void *argument)
             loop_counter > 0 && loop_counter % STANDBY_RESET_INTERVAL == 0)
         {
             attitude_reset(&g_est);
-            USB_PRINTF("[RESET] Standby drift reset | BaroAlt=%.1f m  AccBias=[%.3f,%.3f,%.3f]\r\n",
+            USB_PRINTF("[RESET] Standby drift reset | BaroAlt=%.1f m  AccBias=[%.3f,%.3f,%.3f]"
+                       "  GyroBias=[%.4f,%.4f,%.4f] deg/s n=%lu still=%.1f s\r\n",
                        flight_data.baro_sample.altitude_m,
-                       g_est.acc_bias_w[0], g_est.acc_bias_w[1], g_est.acc_bias_w[2]);
+                       g_est.acc_bias_w[0], g_est.acc_bias_w[1], g_est.acc_bias_w[2],
+                       g_est.gyro_bias[0] * RAD2DEG, g_est.gyro_bias[1] * RAD2DEG,
+                       g_est.gyro_bias[2] * RAD2DEG, (unsigned long)g_est.gyro_bias_n,
+                       (float)g_est.still_ticks * CONTROL_DT_S);
         }
 
         /* -- 10. Timing ---------------------------------------------------- */

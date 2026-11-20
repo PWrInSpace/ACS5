@@ -31,6 +31,13 @@ typedef struct
     float    baro_vel_min_span_s; /* shortest altitude difference the vz
                                    * estimate is taken over; see flight_sm.c */
     uint32_t post_falling_timeout_ticks;  /* mission_complete latches this long after FALLING entry */
+    uint32_t max_coast_ticks;     /* FREE_FLIGHT->FALLING regardless of baro */
+    /* Launch confirmation: after launch_confirm_ticks in ACCELERATION, return to
+     * STANDBY if the baro climbed less than launch_confirm_baro_m AND the
+     * IMU-integrated climb is below launch_confirm_imu_m. */
+    uint32_t launch_confirm_ticks;
+    float    launch_confirm_baro_m;
+    float    launch_confirm_imu_m;
 } flight_sm_config_t;
 
 flight_sm_config_t flight_sm_config_default(void);
@@ -42,6 +49,7 @@ typedef struct
     float baro_alt_m;   /* raw barometric altitude */
     bool  baro_fresh;   /* new baro sample this tick */
     float baro_dt_s;    /* measured baro publish interval, s; valid when baro_fresh */
+    float vel_z_mps;    /* estimator vertical velocity; seeds baro_vel_z at burnout */
 } flight_sm_input_t;
 
 typedef struct
@@ -56,7 +64,17 @@ typedef struct
     bool     baro_vel_seeded;
     uint32_t tick;
     uint32_t falling_entry_tick;
+    uint32_t coast_entry_tick;
     bool     mission_complete;
+
+    /* launch confirmation */
+    float    pad_baro_alt;        /* last finite baro altitude seen in STANDBY */
+    bool     pad_baro_valid;
+    uint32_t launch_tick;
+    float    boost_baro_max;      /* highest baro altitude since launch */
+    bool     boost_baro_seen;
+    float    boost_imu_v, boost_imu_h;  /* IMU-integrated climb since launch */
+    uint32_t false_launch_count;
 } flight_sm_t;
 
 void        flight_sm_init(flight_sm_t *sm, const flight_sm_config_t *cfg);

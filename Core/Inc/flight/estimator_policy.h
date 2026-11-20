@@ -15,8 +15,9 @@ typedef struct
 
 estimator_gates_t estimator_gates(flight_state_t state, bool calib_done);
 
-/* True when the barometric vertical speed may aid the estimator. */
-bool estimator_baro_vel_valid(flight_state_t state, bool baro_datum_set);
+/* True when flight_sm's barometric vertical speed may aid the estimator;
+ * baro_recent = a baro sample arrived within the velocity filter's horizon. */
+bool estimator_baro_vel_valid(flight_state_t state, bool baro_datum_set, bool baro_recent);
 
 /* True when a sample stamped sample_us is younger than max_age_us at now_us; 0 = never sampled. */
 bool baro_sample_fresh(uint32_t sample_us, uint32_t now_us, uint32_t max_age_us);

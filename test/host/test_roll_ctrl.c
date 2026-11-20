@@ -916,6 +916,49 @@ static void test_intermittent_faults_do_not_thrash_the_sequencer(void)
     CHECK(aborts <= 2);
 }
 
+/* An IMU dropout freezes the rate at a finite value; rate_stale must abort within the debounce. */
+static void test_stale_rate_aborts_within_debounce(void)
+{
+    roll_ctrl_config_t cfg = test_cfg();
+    roll_ctrl_t rc;
+    roll_ctrl_init(&rc, &cfg);
+    plant_t pl;
+    plant_init(&pl, 0.0f);
+    while (rc.phase != ROLL_CTRL_ROTATE) run(&rc, &pl, 1, true, NULL);
+    run(&rc, &pl, CTRL_HZ / 4, true, NULL);
+
+    const float frozen = pl.p;
+    for (unsigned i = 0; i < cfg.abort_debounce_ticks; i++) {
+        roll_ctrl_input_t in = { .q = pl.q, .q_valid = true, .roll_rate_rads = frozen,
+                                 .rate_stale = true, .maneuver_enabled = true };
+        plant_step(&pl, roll_ctrl_step(&rc, &in));
+    }
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
+}
+
+/* In ABORT with no fresh rate the canards return to neutral and the integrator is left alone. */
+static void test_abort_without_fresh_rate_goes_neutral(void)
+{
+    roll_ctrl_config_t cfg = test_cfg();
+    roll_ctrl_t rc;
+    roll_ctrl_init(&rc, &cfg);
+    plant_t pl;
+    plant_init(&pl, 3.0f);
+    run(&rc, &pl, 100, true, NULL);
+
+    float d = 0.0f;
+    float integ = 0.0f;
+    for (int i = 0; i < CTRL_HZ; i++) {
+        roll_ctrl_input_t in = { .q = pl.q, .q_valid = true, .roll_rate_rads = 3.0f,
+                                 .rate_stale = true, .maneuver_enabled = true };
+        d = roll_ctrl_step(&rc, &in);
+        if (rc.phase == ROLL_CTRL_ABORT && integ == 0.0f) integ = rc.rate_integrator;
+    }
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
+    CHECK_NEAR(d, 0.0f, 1e-6f);
+    CHECK_NEAR(rc.rate_integrator, integ, 1e-6f);
+}
+
 int main(void)
 {
     test_full_sequence();
@@ -944,6 +987,8 @@ int main(void)
     test_zero_debounce_still_aborts();
     test_bad_gyro_holds_last_sample();
     test_bad_gyro_recovery_stays_bounded();
+    test_stale_rate_aborts_within_debounce();
+    test_abort_without_fresh_rate_goes_neutral();
     test_abort_on_excess_rate();
     test_no_authority_still_reaches_hold();
     test_damp_regression_pin();

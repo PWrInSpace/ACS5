@@ -32,6 +32,8 @@ acs5_host_test(test_baro_datum      flight/baro_datum.c)
 acs5_host_test(test_control_rate)
 acs5_host_test(test_estimator_policy flight/estimator_policy.c)
 acs5_host_test(test_flight_sm       flight/flight_sm.c)
+acs5_host_test(test_flight_pipeline filter/attitude.c filter/mahony.c utils/quat.c
+               flight/flight_sm.c flight/estimator_policy.c control/qbar.c)
 acs5_host_test(test_geo_ned         utils/geo_ned.c)
 acs5_host_test(test_ms5611_math     sensor_drivers/baro/ms5611_math.c)
 acs5_host_test(test_qbar            control/qbar.c)
