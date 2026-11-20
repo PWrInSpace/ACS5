@@ -1,11 +1,5 @@
-/*
- * High-resolution monotonic timestamp via the Cortex-M7 DWT cycle counter.
- * Call timestamp_init() once at boot before any read. Raw CYCCNT wraps every
- * 2^32 cycles (~14.3 s @ 300 MHz); timestamp_cycles64() extends it in
- * software, so timestamp_us() is subtraction-safe for spans up to ~71 min.
- * The extension state is unguarded: call timestamp_us()/timestamp_cycles64()
- * from the aggregator task only.
- */
+/* Monotonic DWT-cycle timestamp, extended to 64 bits; timestamp_init() once at boot first.
+ * The extension state is unguarded: read it from the flight task only. */
 #pragma once
 
 #include <stdint.h>
@@ -14,9 +8,8 @@
 
 extern counter64_t g_cycle_counter;
 
-/* DWT CYCCNT runs at the CPU clock. Kept as a compile-time constant so the
- * division in timestamp_us() folds to a multiply instead of __aeabi_uldivmod;
- * timestamp_init() traps a clock tree that no longer matches. */
+/* DWT CYCCNT runs at the CPU clock; a compile-time constant lets timestamp_us() divide by
+ * multiplying. timestamp_init() traps a clock tree that no longer matches. */
 #define CPU_HZ        300000000UL
 #define CYCLES_PER_US (CPU_HZ / 1000000UL)
 

@@ -1,4 +1,4 @@
-#include "baro/ms5611.h"
+#include "sensor_drivers/baro/ms5611.h"
 #include "utils/timestamp.h" // timestamp_us()
 #include "FreeRTOS.h"
 #include "task.h"
@@ -23,9 +23,8 @@ typedef enum
     STATE_WAIT_D2,    /* wait for D2 -> read D2 + compute + send D1 */
 } ms5611_state_t;
 
-/* Pressure samples between temperature refreshes. At a 10 ms poll this keeps
- * the compensation temperature under ~0.2 s old while publishing pressure on
- * every cycle. */
+/* Pressure samples between temperature refreshes; at a 10 ms poll the
+ * compensation temperature stays under ~0.2 s old. */
 #define MS5611_TEMP_EVERY_N 16U
 
 /* Datasheet SCLK maximum for the SPI protocol. */
@@ -75,7 +74,14 @@ static bool read_adc(ms5611_t *self, uint32_t *result)
         return false;
     }
 
-    *result = (rx[0] << 16) | (rx[1] << 8) | rx[2];
+    /* The part answers 0 to a read before the conversion finished or a repeated read. */
+    const uint32_t v = ((uint32_t)rx[0] << 16) | ((uint32_t)rx[1] << 8) | rx[2];
+    if (v == 0U)
+    {
+        report_error(self);
+        return false;
+    }
+    *result = v;
     return true;
 }
 
@@ -112,16 +118,15 @@ bool ms5611_init(ms5611_t *self, SPI_HandleTypeDef *spi,
     // 1. Reset
     if (!send_command(self, CMD_RESET)) return false;
 
-    // Wait ~3ms for reset sequence to complete.
-    // Since init is blocking and done before flight, HAL_Delay or vTaskDelay is fine.
+    // Reset takes ~3 ms.
     vTaskDelay(pdMS_TO_TICKS(5));
 
     // 2. Read PROM
     uint16_t prom[8] = {0};
     if (!read_prom(self, prom)) return false;
 
-    // 3. Verify CRC-4
-    if (!ms5611_verify_crc4(prom))
+    // 3. Verify CRC-4, and reject the all-0/all-1 PROM of a dead bus
+    if (!ms5611_verify_crc4(prom) || !ms5611_prom_plausible(prom))
     {
         return false;
     }
@@ -154,18 +159,17 @@ static void compute_and_publish(ms5611_t *self)
 
     float altitude_m = ms5611_pressure_to_altitude(pressure_pa, self->qnh_pa);
 
-    /* A short or premature ADC read yields nonsense D1/D2, which compensates to
-     * a negative pressure and a NaN altitude. Consumers hold the last published
-     * sample, so a poisoned one would never wash out. */
+    /* A premature ADC read compensates to a NaN altitude; consumers hold the last
+     * published sample, so a poisoned one would never wash out. */
     if (!isfinite(pressure_pa) || !isfinite(altitude_m))
     {
         report_error(self);
         return;
     }
 
-    // timestamp_us() is a register read; take it once and reuse it for both the
-    // stamp and the interval so the two cannot disagree.
-    uint32_t now_us = timestamp_us();
+    /* The pressure is from the D1 conversion; on a temperature cycle the publish
+     * comes one poll later, so the publish time would skew dt_s. */
+    const uint32_t now_us = self->d1_read_us;
 
     taskENTER_CRITICAL();
     self->last_sample.pressure_pa   = pressure_pa;
@@ -211,10 +215,10 @@ void ms5611_update(ms5611_t *self)
                     self->state = STATE_CONVERT_D1; // Retry on fail
                     break;
                 }
+                self->d1_read_us = timestamp_us();
 
-                /* Die temperature moves in seconds, pressure in milliseconds.
-                 * Refreshing D2 every cycle would halve the pressure rate for
-                 * a correction that has not measurably changed. */
+                /* Die temperature moves in seconds: refreshing D2 every cycle would
+                 * halve the pressure rate for no measurable correction. */
                 if (self->temp_countdown == 0U)
                 {
                     if (send_command(self, CMD_CONVERT_D2 + (uint8_t)self->osr))
@@ -224,10 +228,8 @@ void ms5611_update(ms5611_t *self)
                     }
                     else
                     {
-                        /* Without this the state stays WAIT_D1 with an expired
-                         * timer and nothing ever publishes again. temp_countdown
-                         * is left at 0 so the refresh is retried next cycle
-                         * rather than deferred another MS5611_TEMP_EVERY_N. */
+                        /* Else WAIT_D1 never publishes again; temp_countdown stays 0
+                         * so D2 is retried next cycle. */
                         start_pressure_conversion(self);
                     }
                     break;

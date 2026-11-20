@@ -1,6 +1,4 @@
-/*
- * ACS5 - u-blox UBX protocol.
- */
+/* u-blox UBX protocol layer. */
 #include "sensor_drivers/gnss/ubx_parse.h"
 
 #include <assert.h>
@@ -80,9 +78,8 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
         }
         else if (b == UBX_SYNC1)
         {
-            /* B5 B5 62: the second B5 is the real frame's first byte. Staying
-             * here rather than returning to SYNC1 is what makes a run of B5
-             * bytes before a frame harmless. */
+            /* B5 B5 62: the second B5 starts the real frame, so stay rather
+             * than return to SYNC1. */
         }
         else
         {
@@ -117,9 +114,8 @@ bool ubx_parse_byte(ubx_parser_t *p, uint8_t b)
 
         if (p->len > UBX_MAX_PAYLOAD)
         {
-            /* Either an unsupported message or a corrupt header; see the
-             * UBX_MAX_PAYLOAD comment for why both resync rather than skip. */
-
+            /* Unsupported message or corrupt header: resync rather than skip,
+             * since a corrupt length would swallow the frames after it. */
             p->stats.oversized++;
             ubx_parser_resync(p);
         }
@@ -231,6 +227,7 @@ enum
     PVT_SACC    = 68,
     PVT_HEADACC = 72,
     PVT_PDOP    = 76,
+    PVT_FLAGS3  = 78,
 };
 
 //valid (offset 11) bit positions. 
@@ -285,6 +282,7 @@ bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out
     out->head_motion_deg  = (float)rd_i32(&payload[PVT_HEADMOT]) * 1e-5f;
     out->head_acc_deg     = (float)rd_u32(&payload[PVT_HEADACC]) * 1e-5f;
     out->p_dop            = (float)rd_u16(&payload[PVT_PDOP]) * 0.01f;
+    out->invalid_llh      = (rd_u16(&payload[PVT_FLAGS3]) & 0x0001u) != 0u;
 
     return true;
 }
@@ -293,7 +291,7 @@ bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt)
 {
     assert(pvt != NULL);
 
-    return pvt->fix_ok &&
+    return pvt->fix_ok && !pvt->invalid_llh &&
            (pvt->fix_type == UBX_FIX_3D || pvt->fix_type == UBX_FIX_GNSS_DR);
 }
 

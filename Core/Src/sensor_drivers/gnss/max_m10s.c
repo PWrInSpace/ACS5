@@ -1,9 +1,4 @@
-/*
- * ACS5 - MAX-M10S HAL interface.
- *
- * This file only moves bytes: DMA setup, CFG-VALSET framing, ACK waiting and
- * the drain loop.
- */
+/* MAX-M10S HAL interface: DMA receive, CFG-VALSET framing, ACK waiting, frame drain. */
 
 #include "stm32h7xx_hal.h"
 
@@ -14,10 +9,9 @@
 
 #include "utils/attributes.h"
 
-/* ------------------------------------------------------------------- CFG-VALSET
- *
- * payload = version(1) + layers(1) + reserved(2), then one or more
- *           key(4) + value(1|2|4) pairs. */
+/* ------------------------------------------------------------------- CFG-VALSET */
+
+/* payload = version(1) layers(1) reserved(2), then key(4) + value(1|2|4) pairs. */
 #define MAX_M10S_CFG_HDR_LEN     4u
 #define MAX_M10S_CFG_VAL_MAX_LEN 4u
 #define MAX_M10S_CFG_ITEM_MAX_LEN (4u + MAX_M10S_CFG_VAL_MAX_LEN)
@@ -34,8 +28,9 @@ typedef struct
     uint8_t  size;   /* value width in bytes: 1, 2 or 4 */
 } cfg_item_t;
 
-/* CFG-VALSET RAM layer. */
-#define MAX_M10S_CFG_LAYER_RAM 0x01u
+/* CFG-VALSET layers: RAM, plus battery-backed RAM so a power cycle with the
+ * backup cell fitted keeps the configuration. */
+#define MAX_M10S_CFG_LAYERS    0x03u
 
 /* Configuration keys (u-blox M10 SPG 5.10 interface description). */
 #define MAX_M10S_KEY_UART1_BAUDRATE         0x40520001u   /* U4 */
@@ -44,10 +39,16 @@ typedef struct
 #define MAX_M10S_KEY_RATE_NAV               0x30210002u   /* U2, cycles */
 #define MAX_M10S_KEY_MSGOUT_NAV_PVT_UART1   0x20910007u   /* U1 */
 #define MAX_M10S_KEY_UART1OUTPROT_NMEA      0x10740002u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GPS_ENA         0x1031001fu   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GAL_ENA         0x10310021u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_BDS_ENA         0x10310022u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GLO_ENA         0x10310025u   /* L  */
 
 /* Configuration values. */
 #define MAX_M10S_DYNMODEL_AIRBORNE_4G  8u    /* airborne, < 4 g */
-#define MAX_M10S_MEAS_PERIOD_MS        50u   /* 50 ms -> 20 Hz with NAV rate 1 */
+/* MAX-M10S at the default CPU clock: 10 Hz max with GPS+Galileo (datasheet
+ * Table 2); 20 Hz needs an irreversible OTP clock change. */
+#define MAX_M10S_MEAS_PERIOD_MS        100u
 #define MAX_M10S_NAV_RATE_CYCLES       1u    /* one solution per measurement */
 
 /* ------------------------------------------------------------ tuning constants */
@@ -55,11 +56,19 @@ typedef struct
 /* DMA RX ring size. */
 #define MAX_M10S_DMA_BUF_LEN    512u
 
-/* UART speed used after configuration, and the module's power-on speed. The
- * configuration lives in the module's RAM, so after an MCU-only reset the module
- * is still at the flight speed; after a power cycle it is at the boot speed. */
+/* The configuration lives in module RAM: after an MCU-only reset the module is
+ * still at the flight speed, after a power cycle at its boot speed. */
 #define MAX_M10S_BAUD_FLIGHT    115200u
-#define MAX_M10S_BAUD_BOOT      38400u
+
+/* Power-on speeds to probe: MAX-M10S boots at 9600 (integration manual 2.1.4),
+ * unlike the 38400 firmware default of other M10 modules. */
+static const uint32_t s_boot_bauds[] = {9600u, 38400u};
+
+/* The module needs this long after a baud change before it listens at the new speed. */
+#define MAX_M10S_BAUD_SETTLE_MS 100u
+
+/* A signal change restarts the GNSS subsystem; wait this long after its ACK. */
+#define MAX_M10S_SIGNAL_SETTLE_MS 500u
 
 /* Blocking HAL transmit timeout for one CFG-VALSET frame. */
 #define MAX_M10S_TX_TIMEOUT_MS  50u
@@ -72,12 +81,12 @@ typedef struct
 
 /* ------------------------------------------------------------------ DMA buffer */
 
+/* Read by the CPU with no cache maintenance: the D-cache is off, and enabling it
+ * needs a non-cacheable MPU region over .dma_buf. */
 static uint8_t s_dma_buf[MAX_M10S_DMA_BUF_LEN] ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
 
-/* Index the DMA will write next. NDTR counts down from the buffer length and
- * can read as 0 (or the full length right after a wrap); the modulo folds a
- * full-length result back to 0 so the result is always a valid ring index and
- * a read index can actually equal it. */
+/* Index the DMA will write next. NDTR can read 0 or the full length at a wrap;
+ * the modulo folds both onto one valid ring index. */
 static uint16_t dma_write_pos(const max_m10s_driver_t *drv)
 {
     const uint16_t ndtr = (uint16_t)__HAL_DMA_GET_COUNTER(drv->huart->hdmarx);
@@ -87,6 +96,14 @@ static uint16_t dma_write_pos(const max_m10s_driver_t *drv)
 /* Starts circular receive-to-idle DMA into the ring buffer. */
 static bool start_rx_dma(const max_m10s_driver_t *drv)
 {
+    /* An overrun pending from bytes received while idle aborts the HAL start but
+     * leaves the stream BUSY, failing every later start: abort and clear first. */
+    if (drv->huart->hdmarx->State != HAL_DMA_STATE_READY)
+        (void)HAL_DMA_Abort(drv->huart->hdmarx);
+    __HAL_UART_SEND_REQ(drv->huart, UART_RXDATA_FLUSH_REQUEST);
+    __HAL_UART_CLEAR_FLAG(drv->huart, UART_CLEAR_OREF | UART_CLEAR_NEF |
+                                      UART_CLEAR_FEF | UART_CLEAR_PEF);
+
     if (HAL_UARTEx_ReceiveToIdle_DMA(drv->huart, s_dma_buf,
                                      MAX_M10S_DMA_BUF_LEN) != HAL_OK)
         return false;
@@ -96,32 +113,10 @@ static bool start_rx_dma(const max_m10s_driver_t *drv)
     return true;
 }
 
-/* Drops cached copies of the ring bytes in [from, to), which may wrap.*/
-static void invalidate_ring(uint16_t from, uint16_t to)
-{
-    if (from == to)
-        return;
-
-    if (from < to)
-    {
-        SCB_InvalidateDCache_by_Addr((uint32_t *)&s_dma_buf[from], to - from);
-        return;
-    }
-
-    SCB_InvalidateDCache_by_Addr((uint32_t *)&s_dma_buf[from],
-                                 MAX_M10S_DMA_BUF_LEN - from);
-    if (to > 0u)
-        SCB_InvalidateDCache_by_Addr((uint32_t *)s_dma_buf, to);
-}
-
-/* Feeds ring bytes from *read_pos up to write_pos to the parser. Stops and
- * returns true at the first complete frame, with *read_pos just past it;
- * returns false once write_pos is reached.
- */
+/* Feed ring bytes up to write_pos to the parser; true at the first complete
+ * frame (read_pos just past it), false once write_pos is reached. */
 static bool ring_feed(ubx_parser_t *parser, uint16_t *read_pos, uint16_t write_pos)
 {
-    invalidate_ring(*read_pos, write_pos);
-
     while (*read_pos != write_pos)
     {
         const uint8_t b = s_dma_buf[*read_pos];
@@ -141,11 +136,10 @@ static void put_le(uint8_t *dst, uint32_t value, uint8_t size)
         dst[i] = (uint8_t)((value >> (8u * i)) & 0xFFu);
 }
 
-/* -------------------------------------------------------------- CFG-VALSET ACK
- *
- * Sends one CFG-VALSET carrying `count` key/value pairs and waits for a single
- * ACK-ACK or ACK-NAK for the whole message, retransmitting up to `attempts`
- * times. */
+/* -------------------------------------------------------------- CFG-VALSET ACK */
+
+/* Send one CFG-VALSET with `count` pairs and wait for its single ACK/NAK,
+ * transmitting up to `attempts` times. */
 static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
                                          const cfg_item_t *items, size_t count,
                                          uint8_t attempts)
@@ -157,7 +151,7 @@ static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
         return MAX_M10S_ERR_HAL;
 
     payload[0] = 0x00u;                     /* version */
-    payload[1] = MAX_M10S_CFG_LAYER_RAM;    /* layers */
+    payload[1] = MAX_M10S_CFG_LAYERS;       /* layers */
     payload[2] = 0x00u;                     /* reserved */
     payload[3] = 0x00u;                     /* reserved */
 
@@ -181,6 +175,10 @@ static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
 
     for (uint8_t attempt = 0; attempt < attempts; attempt++)
     {
+        /* A receive error (e.g. a garbled byte around a baud change) stops the DMA. */
+        if (drv->huart->RxState != HAL_UART_STATE_BUSY_RX && !start_rx_dma(drv))
+            return MAX_M10S_ERR_HAL;
+
         if (HAL_UART_Transmit(drv->huart, frame, frame_len,
                               MAX_M10S_TX_TIMEOUT_MS) != HAL_OK)
             return MAX_M10S_ERR_HAL;
@@ -233,6 +231,16 @@ max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv, UART_HandleTypeDef *huar
 static const cfg_item_t s_baud_item =
     { MAX_M10S_KEY_UART1_BAUDRATE, MAX_M10S_BAUD_FLIGHT, 4u };
 
+/* GPS + Galileo only: the module ships with BeiDou on, which caps the
+ * navigation rate at 3 Hz. Sent alone because it restarts the receiver. */
+static const cfg_item_t s_signal_table[] =
+{
+    { MAX_M10S_KEY_SIGNAL_GPS_ENA, 1u, 1u },
+    { MAX_M10S_KEY_SIGNAL_GAL_ENA, 1u, 1u },
+    { MAX_M10S_KEY_SIGNAL_BDS_ENA, 0u, 1u },
+    { MAX_M10S_KEY_SIGNAL_GLO_ENA, 0u, 1u },
+};
+
 /* Everything else, sent after the baud change as one CFG-VALSET message with a
  * single ACK. */
 static const cfg_item_t s_cfg_table[] =
@@ -260,13 +268,8 @@ static bool set_host_baud(const max_m10s_driver_t *drv, uint32_t baud)
     return start_rx_dma(drv);
 }
 
-/* Brings the link up at MAX_M10S_BAUD_FLIGHT whatever speed the module is at.
- *
- * 1. Try the flight speed first: if the module is already there, and its ACK 
- *    proves the link.
- * 2. No answer: the module is at the boot speed. Send the same command at the
- *    boot speed.
- * 3. Switch the STM32 to the flight speed and require an ACK there. */
+/* Bring the link up at MAX_M10S_BAUD_FLIGHT from whatever speed the module is at:
+ * try flight speed, else send the baud change at each boot speed and require an ACK. */
 static max_m10s_status_t negotiate_baud(const max_m10s_driver_t *drv)
 {
     max_m10s_status_t st;
@@ -277,15 +280,22 @@ static max_m10s_status_t negotiate_baud(const max_m10s_driver_t *drv)
     if (st != MAX_M10S_ERR_TIMEOUT)
         return st;   /* OK: already at flight speed. NAK or HAL error: give up. */
 
-    if (!set_host_baud(drv, MAX_M10S_BAUD_BOOT))
-        return MAX_M10S_ERR_HAL;
-    st = send_cfg_valset(drv, &s_baud_item, 1u, 1u);
-    if (st != MAX_M10S_OK && st != MAX_M10S_ERR_TIMEOUT)
-        return st;
+    for (size_t i = 0; i < sizeof s_boot_bauds / sizeof s_boot_bauds[0]; i++)
+    {
+        if (!set_host_baud(drv, s_boot_bauds[i]))
+            return MAX_M10S_ERR_HAL;
+        st = send_cfg_valset(drv, &s_baud_item, 1u, 1u);
+        if (st != MAX_M10S_OK && st != MAX_M10S_ERR_TIMEOUT)
+            return st;
+        HAL_Delay(MAX_M10S_BAUD_SETTLE_MS);
 
-    if (!set_host_baud(drv, MAX_M10S_BAUD_FLIGHT))
-        return MAX_M10S_ERR_HAL;
-    return send_cfg_valset(drv, &s_baud_item, 1u, MAX_M10S_CFG_RETRIES);
+        if (!set_host_baud(drv, MAX_M10S_BAUD_FLIGHT))
+            return MAX_M10S_ERR_HAL;
+        st = send_cfg_valset(drv, &s_baud_item, 1u, MAX_M10S_CFG_RETRIES);
+        if (st != MAX_M10S_ERR_TIMEOUT)
+            return st;
+    }
+    return MAX_M10S_ERR_TIMEOUT;
 }
 
 max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
@@ -293,6 +303,13 @@ max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
     max_m10s_status_t st = negotiate_baud(drv);
     if (st != MAX_M10S_OK)
         return st;
+
+    st = send_cfg_valset(drv, s_signal_table,
+                         sizeof s_signal_table / sizeof s_signal_table[0],
+                         MAX_M10S_CFG_RETRIES);
+    if (st != MAX_M10S_OK)
+        return st;
+    HAL_Delay(MAX_M10S_SIGNAL_SETTLE_MS);
 
     st = send_cfg_valset(drv, s_cfg_table, CFG_TABLE_LEN, MAX_M10S_CFG_RETRIES);
     if (st != MAX_M10S_OK)
@@ -308,9 +325,8 @@ max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
 
 bool max_m10s_drain(max_m10s_driver_t *drv, max_m10s_frame_t *frame)
 {
-    /* A receive error stopped the DMA: restart it, and drop what was in flight
-     * (read pointer to the new write position, parser back to hunting). If the
-     * restart itself fails, stay pending and try again on the next call. */
+    /* A receive error stopped the DMA: restart it and drop what was in flight;
+     * a failed restart stays pending for the next call. */
     if (drv->rx_restart_pending)
     {
         if (!start_rx_dma(drv))

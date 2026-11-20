@@ -1,6 +1,6 @@
 // Tests for the UBX codec: frame building, the byte-at-a-time parser and its
 // counters, the NAV-PVT decoder, the position-fix rule and the ACK matcher.
-#include <assert.h>
+#include "test_assert.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -26,14 +26,14 @@ static void test_frame_build_known_vectors(void) {
     uint8_t out[16];
     uint16_t n = ubx_frame_build(out, sizeof out, UBX_CLASS_ACK, UBX_ID_ACK_ACK,
                                  ack_payload, 2);
-    assert(n == sizeof ack_expected);
-    assert(memcmp(out, ack_expected, n) == 0);
+    CHECK(n == sizeof ack_expected);
+    CHECK(memcmp(out, ack_expected, n) == 0);
 
     // Poll request: no payload.
     const uint8_t poll_expected[] = {0xB5, 0x62, 0x01, 0x07, 0x00, 0x00, 0x08, 0x19};
     n = ubx_frame_build(out, sizeof out, UBX_CLASS_NAV, UBX_ID_NAV_PVT, NULL, 0);
-    assert(n == sizeof poll_expected);
-    assert(memcmp(out, poll_expected, n) == 0);
+    CHECK(n == sizeof poll_expected);
+    CHECK(memcmp(out, poll_expected, n) == 0);
 }
 
 static void test_frame_build_length_and_capacity(void) {
@@ -42,23 +42,23 @@ static void test_frame_build_length_and_capacity(void) {
 
     // Total length is payload + UBX_FRAME_OVERHEAD, and the length field says so.
     uint16_t n = ubx_frame_build(out, sizeof out, 0x06, 0x8A, payload, 40);
-    assert(n == 40 + UBX_FRAME_OVERHEAD);
-    assert(out[UBX_OFS_LEN] == 40 && out[UBX_OFS_LEN + 1] == 0);
+    CHECK(n == 40 + UBX_FRAME_OVERHEAD);
+    CHECK(out[UBX_OFS_LEN] == 40 && out[UBX_OFS_LEN + 1] == 0);
 
     // A buffer of exactly that size works, one byte less is refused untouched.
     uint8_t tight[48 + 1];
     memset(tight, 0xEE, sizeof tight);
-    assert(ubx_frame_build(tight, 48, 0x06, 0x8A, payload, 40) == 48);
-    assert(tight[48] == 0xEE);                       // nothing written past the end
+    CHECK(ubx_frame_build(tight, 48, 0x06, 0x8A, payload, 40) == 48);
+    CHECK(tight[48] == 0xEE);                       // nothing written past the end
     memset(tight, 0xEE, sizeof tight);
-    assert(ubx_frame_build(tight, 47, 0x06, 0x8A, payload, 40) == 0);
-    assert(tight[0] == 0xEE);                        // refused before writing
+    CHECK(ubx_frame_build(tight, 47, 0x06, 0x8A, payload, 40) == 0);
+    CHECK(tight[0] == 0xEE);                        // refused before writing
 
     // A payload longer than 255 bytes needs the high length byte.
     static uint8_t big[300], bigout[320];
     n = ubx_frame_build(bigout, sizeof bigout, 0x01, 0x02, big, 300);
-    assert(n == 300 + UBX_FRAME_OVERHEAD);
-    assert(bigout[UBX_OFS_LEN] == (300 & 0xFF) && bigout[UBX_OFS_LEN + 1] == (300 >> 8));
+    CHECK(n == 300 + UBX_FRAME_OVERHEAD);
+    CHECK(bigout[UBX_OFS_LEN] == (300 & 0xFF) && bigout[UBX_OFS_LEN + 1] == (300 >> 8));
 }
 
 /* -------------------------------------------------------------- parsing */
@@ -68,10 +68,10 @@ static void test_parse_reports_frame_on_last_byte(void) {
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    for (uint16_t i = 0; i < n - 1; i++) assert(!ubx_parse_byte(&p, f[i]));
-    assert(ubx_parse_byte(&p, f[n - 1]));
-    assert(p.msg_class == UBX_CLASS_NAV && p.msg_id == UBX_ID_NAV_PVT && p.len == 92);
-    assert(p.stats.frames_ok == 1);
+    for (uint16_t i = 0; i < n - 1; i++) CHECK(!ubx_parse_byte(&p, f[i]));
+    CHECK(ubx_parse_byte(&p, f[n - 1]));
+    CHECK(p.msg_class == UBX_CLASS_NAV && p.msg_id == UBX_ID_NAV_PVT && p.len == 92);
+    CHECK(p.stats.frames_ok == 1);
 }
 
 static void test_parse_payload_is_kept(void) {
@@ -80,8 +80,8 @@ static void test_parse_payload_is_kept(void) {
     uint16_t n = ubx_frame_build(f, sizeof f, 0x06, 0x8A, pl, 10);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
-    assert(p.len == 10 && memcmp(p.payload, pl, 10) == 0);
+    CHECK(feed(&p, f, n) == 1);
+    CHECK(p.len == 10 && memcmp(p.payload, pl, 10) == 0);
 }
 
 static void test_parse_back_to_back_and_zero_length(void) {
@@ -92,8 +92,8 @@ static void test_parse_back_to_back_and_zero_length(void) {
     memcpy(stream + na, b, nb);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, stream, na + nb) == 2);
-    assert(p.stats.frames_ok == 2 && p.msg_id == 0x02 && p.len == 4);
+    CHECK(feed(&p, stream, na + nb) == 2);
+    CHECK(p.stats.frames_ok == 2 && p.msg_id == 0x02 && p.len == 4);
 }
 
 static void test_parse_skips_garbage_and_sync_runs(void) {
@@ -105,23 +105,22 @@ static void test_parse_skips_garbage_and_sync_runs(void) {
     memcpy(stream + sizeof junk, f, n);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, stream, sizeof junk + n) == 1);
-    assert(p.msg_class == UBX_CLASS_ACK && p.stats.checksum_errors == 0);
+    CHECK(feed(&p, stream, sizeof junk + n) == 1);
+    CHECK(p.msg_class == UBX_CLASS_ACK && p.stats.checksum_errors == 0);
 }
 
 static void test_parse_same_result_for_any_chunking(void) {
     uint8_t pl[92], f[100];
     for (int i = 0; i < 92; i++) pl[i] = (uint8_t)(i * 7);
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
-    // The parser has no notion of chunks, but the driver feeds it in bursts of
-    // varying size, so check that explicitly.
+    // The driver feeds the parser in bursts of varying size.
     for (uint16_t chunk = 1; chunk <= n; chunk++) {
         ubx_parser_t p;
         ubx_parser_init(&p);
         int frames = 0;
         for (uint16_t i = 0; i < n; i += chunk)
             frames += feed(&p, f + i, (uint16_t)(n - i < chunk ? n - i : chunk));
-        assert(frames == 1 && memcmp(p.payload, pl, 92) == 0);
+        CHECK(frames == 1 && memcmp(p.payload, pl, 92) == 0);
     }
 }
 
@@ -137,20 +136,20 @@ static void test_parse_counts_each_kind_of_error(void) {
     for (int i = 0; i < 2; i++) {                                     // 2 bad ck_a
         n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
         f[n - 2] ^= 0x55;
-        assert(feed(&p, f, n) == 0);
+        CHECK(feed(&p, f, n) == 0);
     }
     n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
     f[n - 1] ^= 0x55;                                                 // 1 bad ck_b
-    assert(feed(&p, f, n) == 0);
+    CHECK(feed(&p, f, n) == 0);
 
     static uint8_t big[300];                                          // 1 oversized
     n = ubx_frame_build(big, sizeof big, UBX_CLASS_NAV, 0x99, big + 6, 200);
-    assert(feed(&p, big, n) == 0);
+    CHECK(feed(&p, big, n) == 0);
 
-    assert(p.stats.frames_ok == 5);
-    assert(p.stats.checksum_errors == 3);
-    assert(p.stats.oversized == 1);
-    assert(p.stats.resyncs == 4);       // every one of the four bad frames
+    CHECK(p.stats.frames_ok == 5);
+    CHECK(p.stats.checksum_errors == 3);
+    CHECK(p.stats.oversized == 1);
+    CHECK(p.stats.resyncs == 4);       // every one of the four bad frames
 }
 
 static void test_parse_recovers_after_a_bad_frame(void) {
@@ -160,9 +159,9 @@ static void test_parse_recovers_after_a_bad_frame(void) {
     bad[40] ^= 0xFF;                                    // corrupt the payload
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, bad, nb) == 0);
-    assert(feed(&p, good, ng) == 1);
-    assert(p.stats.frames_ok == 1 && p.stats.checksum_errors == 1);
+    CHECK(feed(&p, bad, nb) == 0);
+    CHECK(feed(&p, good, ng) == 1);
+    CHECK(p.stats.frames_ok == 1 && p.stats.checksum_errors == 1);
 }
 
 static void test_resync_keeps_counters_init_clears_them(void) {
@@ -170,13 +169,13 @@ static void test_resync_keeps_counters_init_clears_them(void) {
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_ACK, UBX_ID_ACK_ACK, pl, 2);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
+    CHECK(feed(&p, f, n) == 1);
     feed(&p, f, 4);                                     // stop in the middle of a frame
     ubx_parser_resync(&p);
-    assert(p.stats.frames_ok == 1 && p.stats.resyncs == 1);
-    assert(feed(&p, f, n) == 1);                        // hunting again, finds the next one
+    CHECK(p.stats.frames_ok == 1 && p.stats.resyncs == 1);
+    CHECK(feed(&p, f, n) == 1);                        // hunting again, finds the next one
     ubx_parser_init(&p);
-    assert(p.stats.frames_ok == 0 && p.stats.resyncs == 0 && p.stats.checksum_errors == 0);
+    CHECK(p.stats.frames_ok == 0 && p.stats.resyncs == 0 && p.stats.checksum_errors == 0);
 }
 
 /* ------------------------------------------------------------ NAV-PVT */
@@ -188,7 +187,7 @@ static void put_u32(uint8_t *p, uint32_t v) {
 static void put_i32(uint8_t *p, int32_t v) { put_u32(p, (uint32_t)v); }
 
 // A payload with every field set to a distinct, known value (offsets from the
-// u-blox M10 interface description, written out here on purpose).
+// u-blox M10 interface description).
 static void make_pvt(uint8_t pl[92], uint8_t fix_type, uint8_t flags) {
     memset(pl, 0, 92);
     put_u32(pl + 0, 123456789u);           // iTOW, ms
@@ -220,25 +219,25 @@ static void test_decode_nav_pvt_fields_and_scaling(void) {
     uint8_t pl[92];
     make_pvt(pl, 3, 0x01);
     ubx_nav_pvt_t v;
-    assert(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
 
-    assert(v.itow_ms == 123456789u);
-    assert(v.year == 2026 && v.month == 11 && v.day == 5);
-    assert(v.hour == 9 && v.min == 41 && v.sec == 27);
-    assert(v.valid_date && v.valid_time && v.fully_resolved);
-    assert(v.t_acc_ns == 2500u && v.nano == -1500);
-    assert(v.fix_type == UBX_FIX_3D && v.fix_ok && v.num_sv == 17);
-    assert(v.lon_1e7 == 170000000 && v.lat_1e7 == -511234567);   // longitude comes first on the wire
-    assert(v.height_mm == 123456 && v.h_msl_mm == 120000);
-    assert(fabsf(v.h_acc_m - 1.8f) < 1e-5f && fabsf(v.v_acc_m - 2.4f) < 1e-5f);
-    assert(fabsf(v.vel_ned_mps[0] - 250.0f) < 1e-3f);
-    assert(fabsf(v.vel_ned_mps[1] + 125.0f) < 1e-3f);
-    assert(fabsf(v.vel_ned_mps[2] + 310.0f) < 1e-3f);            // Down is positive downward
-    assert(fabsf(v.ground_speed_mps - 279.508f) < 1e-3f);
-    assert(fabsf(v.s_acc_mps - 0.45f) < 1e-5f);
-    assert(fabsf(v.head_motion_deg - 123.45678f) < 1e-3f);
-    assert(fabsf(v.head_acc_deg - 2.5f) < 1e-5f);
-    assert(fabsf(v.p_dop - 1.23f) < 1e-5f);
+    CHECK(v.itow_ms == 123456789u);
+    CHECK(v.year == 2026 && v.month == 11 && v.day == 5);
+    CHECK(v.hour == 9 && v.min == 41 && v.sec == 27);
+    CHECK(v.valid_date && v.valid_time && v.fully_resolved);
+    CHECK(v.t_acc_ns == 2500u && v.nano == -1500);
+    CHECK(v.fix_type == UBX_FIX_3D && v.fix_ok && v.num_sv == 17);
+    CHECK(v.lon_1e7 == 170000000 && v.lat_1e7 == -511234567);   // longitude comes first on the wire
+    CHECK(v.height_mm == 123456 && v.h_msl_mm == 120000);
+    CHECK(fabsf(v.h_acc_m - 1.8f) < 1e-5f && fabsf(v.v_acc_m - 2.4f) < 1e-5f);
+    CHECK_NEAR(v.vel_ned_mps[0], 250.0f, 1e-3f);
+    CHECK_NEAR(v.vel_ned_mps[1], -(125.0f), 1e-3f);
+    CHECK_NEAR(v.vel_ned_mps[2], -(310.0f), 1e-3f);            // Down is positive downward
+    CHECK_NEAR(v.ground_speed_mps, 279.508f, 1e-3f);
+    CHECK_NEAR(v.s_acc_mps, 0.45f, 1e-5f);
+    CHECK_NEAR(v.head_motion_deg, 123.45678f, 1e-3f);
+    CHECK_NEAR(v.head_acc_deg, 2.5f, 1e-5f);
+    CHECK_NEAR(v.p_dop, 1.23f, 1e-5f);
 }
 
 static void test_decode_nav_pvt_flags_and_length(void) {
@@ -246,17 +245,17 @@ static void test_decode_nav_pvt_flags_and_length(void) {
     ubx_nav_pvt_t v;
 
     make_pvt(pl, 3, 0x00);                               // gnssFixOK clear
-    assert(ubx_decode_nav_pvt(pl, 92, &v) && !v.fix_ok);
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v) && !v.fix_ok);
     make_pvt(pl, 3, 0xFE);                               // every other flag set
-    assert(ubx_decode_nav_pvt(pl, 92, &v) && !v.fix_ok);
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v) && !v.fix_ok);
 
     pl[11] = 0x00;                                       // time/date not valid
-    assert(ubx_decode_nav_pvt(pl, 92, &v));
-    assert(!v.valid_date && !v.valid_time && !v.fully_resolved);
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(!v.valid_date && !v.valid_time && !v.fully_resolved);
 
-    assert(!ubx_decode_nav_pvt(pl, 91, &v));             // wrong lengths are refused
-    assert(!ubx_decode_nav_pvt(pl, 93, &v));
-    assert(!ubx_decode_nav_pvt(pl, 0, &v));
+    CHECK(!ubx_decode_nav_pvt(pl, 91, &v));             // wrong lengths are refused
+    CHECK(!ubx_decode_nav_pvt(pl, 93, &v));
+    CHECK(!ubx_decode_nav_pvt(pl, 0, &v));
 }
 
 static void test_nav_pvt_survives_the_wire(void) {
@@ -266,10 +265,10 @@ static void test_nav_pvt_survives_the_wire(void) {
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, UBX_ID_NAV_PVT, pl, 92);
     ubx_parser_t p;
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
+    CHECK(feed(&p, f, n) == 1);
     ubx_nav_pvt_t v;
-    assert(ubx_decode_nav_pvt(p.payload, p.len, &v));
-    assert(v.fix_type == UBX_FIX_GNSS_DR && v.num_sv == 17 && v.lat_1e7 == -511234567);
+    CHECK(ubx_decode_nav_pvt(p.payload, p.len, &v));
+    CHECK(v.fix_type == UBX_FIX_GNSS_DR && v.num_sv == 17 && v.lat_1e7 == -511234567);
 }
 
 static void test_has_position_truth_table(void) {
@@ -281,9 +280,24 @@ static void test_has_position_truth_table(void) {
             v.fix_type = (ubx_fix_type_t)type;
             v.fix_ok = ok != 0;
             const bool want = ok && (type == UBX_FIX_3D || type == UBX_FIX_GNSS_DR);
-            assert(ubx_nav_pvt_has_position(&v) == want);
+            CHECK(ubx_nav_pvt_has_position(&v) == want);
         }
     }
+}
+
+/* flags3 bit 0 (invalidLlh) voids lat/lon/height even on a valid 3D fix. */
+static void test_invalid_llh_voids_position(void) {
+    uint8_t pl[92];
+    make_pvt(pl, UBX_FIX_3D, 0x01);
+    ubx_nav_pvt_t v;
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(!v.invalid_llh);
+    CHECK(ubx_nav_pvt_has_position(&v));
+
+    put_u16(&pl[78], 0x0001);
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(v.invalid_llh);
+    CHECK(!ubx_nav_pvt_has_position(&v));
 }
 
 /* ---------------------------------------------------------------- ACK */
@@ -292,7 +306,7 @@ static void parse_ack(ubx_parser_t *p, uint8_t id, uint8_t cls, uint8_t msg) {
     uint8_t pl[2] = {cls, msg}, f[16];
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_ACK, id, pl, 2);
     ubx_parser_init(p);
-    assert(feed(p, f, n) == 1);
+    CHECK(feed(p, f, n) == 1);
 }
 
 static void test_is_ack_for(void) {
@@ -300,34 +314,34 @@ static void test_is_ack_for(void) {
     bool acked = false;
 
     parse_ack(&p, UBX_ID_ACK_ACK, UBX_CLASS_CFG, UBX_ID_CFG_VALSET);
-    assert(ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked) && acked);
+    CHECK(ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked) && acked);
 
     parse_ack(&p, UBX_ID_ACK_NAK, UBX_CLASS_CFG, UBX_ID_CFG_VALSET);
     acked = true;
-    assert(ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked) && !acked);
+    CHECK(ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked) && !acked);
 
     // An answer to a different message is not ours.
     parse_ack(&p, UBX_ID_ACK_ACK, UBX_CLASS_CFG, 0x01);
-    assert(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
+    CHECK(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
     parse_ack(&p, UBX_ID_ACK_ACK, UBX_CLASS_NAV, UBX_ID_CFG_VALSET);
-    assert(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
+    CHECK(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
 
     // A frame that is not an ACK/NAK at all.
     uint8_t pl[2] = {UBX_CLASS_CFG, UBX_ID_CFG_VALSET}, f[16];
     uint16_t n = ubx_frame_build(f, sizeof f, UBX_CLASS_NAV, 0x01, pl, 2);
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
-    assert(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
+    CHECK(feed(&p, f, n) == 1);
+    CHECK(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
 
     // Right class, unknown id, and a payload of the wrong length.
     n = ubx_frame_build(f, sizeof f, UBX_CLASS_ACK, 0x07, pl, 2);
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
-    assert(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
+    CHECK(feed(&p, f, n) == 1);
+    CHECK(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
     n = ubx_frame_build(f, sizeof f, UBX_CLASS_ACK, UBX_ID_ACK_ACK, pl, 1);
     ubx_parser_init(&p);
-    assert(feed(&p, f, n) == 1);
-    assert(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
+    CHECK(feed(&p, f, n) == 1);
+    CHECK(!ubx_is_ack_for(&p, UBX_CLASS_CFG, UBX_ID_CFG_VALSET, &acked));
 }
 
 int main(void) {
@@ -345,7 +359,7 @@ int main(void) {
     test_decode_nav_pvt_flags_and_length();
     test_nav_pvt_survives_the_wire();
     test_has_position_truth_table();
+    test_invalid_llh_voids_position();
     test_is_ack_for();
-    puts("test_ubx_parse: all passed");
-    return 0;
+    return test_report("ubx_parse");
 }

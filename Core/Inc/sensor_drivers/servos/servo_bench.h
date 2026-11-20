@@ -1,17 +1,13 @@
-/*
- * Bench sequence for the servo test build: one fin at a time through
- * +10 / -10 / 0 deg, then the canard lock open / closed. Pure function of
- * time, host-testable.
- */
+/* Servo bench sequence as a pure function of time: each fin through +10 / -10 / 0 deg,
+ * then the canard lock open / closed. */
 #pragma once
 
 #include <stdint.h>
 
+#include "sensor_drivers/servos/canard_lock_pulse.h"
+
 #define SERVO_BENCH_FIN_COUNT      4
 #define SERVO_BENCH_DEFLECTION_DEG 10.0f
-
-#define CANARD_LOCK_US_LOCKED   1900u
-#define CANARD_LOCK_US_UNLOCKED 1050u
 
 typedef struct
 {

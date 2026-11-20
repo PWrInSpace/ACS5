@@ -1,4 +1,4 @@
-#include "servos/servo_bench.h"
+#include "sensor_drivers/servos/servo_bench.h"
 
 #include <string.h>
 

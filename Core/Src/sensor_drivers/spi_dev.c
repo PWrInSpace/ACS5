@@ -16,10 +16,8 @@ static uint32_t kernel_clock_hz(const SPI_HandleTypeDef *spi)
     return HAL_RCCEx_GetPeriphCLKFreq(sel);
 }
 
-/* MBR n divides the kernel clock by 2^(n+1). Returns the fastest setting that
- * still respects max_sck_hz, falling back to the slowest when the kernel clock
- * cannot be read - running a slave over its rated SCK is the failure that must
- * not happen by default. */
+/* MBR n divides the kernel clock by 2^(n+1). Fastest setting within max_sck_hz;
+ * the slowest when the kernel clock cannot be read, never an overclock. */
 static uint32_t baud_for(uint32_t kernel_hz, uint32_t max_sck_hz)
 {
     if (kernel_hz != 0U)
@@ -36,9 +34,8 @@ static uint32_t baud_for(uint32_t kernel_hz, uint32_t max_sck_hz)
     return 7U << SPI_CFG1_MBR_Pos;
 }
 
-/* CFG1.MBR may only be written while the peripheral is disabled. Every blocking
- * HAL transfer ends in SPI_CloseTransfer, which clears SPE, so the gap between
- * transactions is the one window in which this is legal. */
+/* CFG1.MBR is writable only with SPE clear; every blocking HAL transfer ends in
+ * SPI_CloseTransfer, which clears it, so between transactions is legal. */
 static void bus_claim(spi_dev_t *dev)
 {
     MODIFY_REG(dev->spi->Instance->CFG1, SPI_CFG1_MBR, dev->baud);

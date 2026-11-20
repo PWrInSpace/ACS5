@@ -7,8 +7,6 @@
 #define Kp_accel        0.5f
 #define Kp_mag          0.25f
 #define Ki              0.005f
-#define ACCEL_TRUST_MIN (0.7f * GRAVITY)
-#define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
 void mahony_init(mahony_t *m)
 {
@@ -38,11 +36,8 @@ void mahony_update(mahony_t *m,
     float ex = 0.0f, ey = 0.0f, ez = 0.0f;
 
     float accel_mag = sqrtf(avg[0]*avg[0] + avg[1]*avg[1] + avg[2]*avg[2]);
-    /* The magnitude window alone cannot tell gravity from drag: it only says
-     * the vector is about 1 g, and a decelerating airframe can produce that.
-     * The flight phase is what actually knows, so it gates both corrections -
-     * the magnitude check stays as a second line, for a sensor gone wrong
-     * rather than a vehicle in the wrong phase. */
+    /* A decelerating airframe can read about 1 g of drag, so the flight phase gates the
+     * corrections; the magnitude window only catches a faulty sensor. */
     bool  accel_trustworthy = !corrections_inhibited &&
                               (accel_mag >= ACCEL_TRUST_MIN &&
                                accel_mag <= ACCEL_TRUST_MAX);
@@ -89,9 +84,8 @@ void mahony_update(mahony_t *m,
                     }
 
                     if (m->mag_ref_inited) {
-                        /* measured x expected, the same order as the accel term
-                         * above. Reversed, this term is positive feedback on
-                         * heading and the estimate walks away from the truth. */
+                        /* measured x expected, as in the accel term; reversed, it is
+                         * positive feedback on heading. */
                         float yaw_err_world = hx*m->ref_mag_h[1] - hy*m->ref_mag_h[0];
                         float err_w[3] = {0.0f, 0.0f, yaw_err_world};
                         float err_b[3] = {0};

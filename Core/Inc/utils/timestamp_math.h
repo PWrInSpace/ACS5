@@ -1,9 +1,5 @@
-/*
- * Pure 32->64-bit counter extension for the DWT cycle counter, split from
- * timestamp.h so host tests compile it without CMSIS headers.
- * Correct while consecutive calls are less than one 2^32-count wrap apart
- * (~14.3 s at 300 MHz); the 500 Hz loop calls every 2 ms.
- */
+/* HAL-free 32->64-bit counter extension; correct while calls are under one 2^32-count
+ * wrap apart (~14.3 s at 300 MHz). */
 #pragma once
 
 #include <stdint.h>

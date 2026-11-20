@@ -1,28 +1,5 @@
-/*
- * ACS4 Flight Computer - MS5611 Barometric Pressure Sensor Driver
- *
- * MEAS Switzerland MS5611-01BA03, 24-bit delta-sigma ADC barometer.
- * Communicates over SPI (Mode 0 or 3, max 20 MHz).
- *
- * Features:
- * - Non-blocking state machine (driven by external tick)
- * - Factory PROM calibration read with CRC-4 verification (AN520)
- * - Full 2nd-order temperature compensation per datasheet
- * - Configurable oversampling ratio (256-4096)
- * - Output in SI units: Pa, degC
- * - Barometric altitude helper
- *
- * Typical usage:
- *   ms5611_t baro;
- *   ms5611_config_t cfg = ms5611_config_rocket_default();
- *   ms5611_init(&baro, &hspi2, BARO_CS_GPIO_Port, BARO_CS_Pin, &cfg);
- *
- *   // In FlightTask (~100 Hz tick):
- *   ms5611_update(&baro);
- *   if (ms5611_has_new_data(&baro)) {
- *       ms5611_sample_t s = ms5611_sample(&baro);
- *   }
- */
+/* MS5611-01BA03 barometer driver over SPI (mode 0/3, max 20 MHz): non-blocking
+ * state machine advanced by ms5611_update(), CRC-checked PROM, SI-unit output. */
 
 #pragma once
 
@@ -32,7 +9,7 @@
 #include "sensor_drivers/spi_dev.h"
 #include "utils/attributes.h"
 #include "main.h" // STM32 HAL types: GPIO_TypeDef, SPI_HandleTypeDef
-#include "baro/ms5611_math.h"
+#include "sensor_drivers/baro/ms5611_math.h"
 
 /* ========================================================
  * ms5611_sample_t - compensated barometer output
@@ -78,10 +55,8 @@ typedef struct
     uint8_t state;
     bool    initialized;
     bool    new_data;
-    /* Reference pressure for altitude_m. The aggregator retargets this to the
-     * pad pressure during STANDBY, so altitude_m is metres above the launch
-     * site, not above the standard-pressure datum - the SD log's baro_alt
-     * column reads AGL. */
+    /* Reference pressure for altitude_m; the flight task sets it to the pad
+     * pressure in STANDBY, so altitude_m is AGL. */
     float   qnh_pa;
 
     ms5611_osr_t osr;
@@ -93,6 +68,7 @@ typedef struct
     uint8_t  temp_countdown;    /* pressure-only cycles left before D2 is due */
 
     uint32_t conv_start_us;
+    uint32_t d1_read_us;        /* when raw_d1 was read: the sample's time */
     uint32_t error_count;
 
     uint32_t prev_publish_us;   /* end-of-conversion time of the previous publish, for dt_s */

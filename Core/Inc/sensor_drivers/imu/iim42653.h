@@ -1,30 +1,5 @@
-/*
- * ACS4 Flight Computer - IIM-42653 IMU Driver
- *
- * TDK InvenSense IIM-42653 6-axis IMU (3-axis accel + 3-axis gyro).
- * Communicates over SPI (Mode 0 or 3, max 24 MHz).
- *
- * Features:
- *   - Configurable ODR (up to 32 kHz) and FSR
- *   - Burst read of accel + gyro + temperature in 14 bytes
- *   - DRDY interrupt on INT1 (push-pull, active-high)
- *   - Built-in self-test with factory reference comparison
- *   - Multi-bank register access
- *   - Output in SI units: m/s^2, rad/s, degC
- *
- * Hardware mapping (ACS5 / ORC Meteor):
- *   SPI2: PB13 (SCK) / PB14 / PB15 — IOSwap enabled (Meteor SDI/SDO nets)
- *   CS:   PD13 (IMU_CS)
- *   INT1: PD11 (IMU_INT1)
- *   INT2: PD12 (IMU_INT2)
- *
- * Typical usage:
- *   iim42653_t imu;
- *   iim42653_init(&imu, &hspi2, IMU_CS_GPIO_Port, IMU_CS_Pin);
- *   iim42653_configure(&imu, ... iim42653_config_rocket_default() ...);
- *   iim42653_sample_t sample;
- *   iim42653_read(&imu, &sample);
- */
+/* TDK IIM-42653 6-axis IMU driver over SPI (mode 0/3, max 24 MHz); SI-unit output.
+ * Board: SPI2 PB13/PB14/PB15 with IOSwap (Meteor SDI/SDO nets), CS PD13, INT1 PD11, INT2 PD12. */
 
 #pragma once
 
@@ -39,7 +14,7 @@
 #include "spi.h"  // SPI_HandleTypeDef
 
 /* ====================================================
- * iim42653_sample_t - output data posted to the mailbox
+ * iim42653_sample_t - one converted sample
  * ==================================================== */
 
 typedef struct
@@ -49,6 +24,8 @@ typedef struct
     float    accel_raw_mps2[3];   /* as the chip reported it, before cfg.axes */
     float    gyro_raw_rads[3];
     float    temp_degc;       /* die temperature, degC (NaN if sensor data not ready) */
+    bool     accel_clipped;   /* an accel axis sat at full scale */
+    bool     gyro_clipped[3]; /* per raw (chip) gyro axis, before cfg.axes */
     uint32_t timestamp_us;    /* host us, from DWT at the time of the burst read */
 } iim42653_sample_t;
 
@@ -140,7 +117,7 @@ enum
     IIM42653_REG_GYRO_CFG1_FILTER_MASK    = 0xEC, /* GYRO_CONFIG1 */
     IIM42653_REG_ACCEL_CFG1_FILT_ORD_MASK = 0x18, /* ACCEL_CONFIG1 */
     IIM42653_REG_TMST_EN_1US              = 0x21, /* TMST_CONFIG */
-    IIM42653_REG_INT_CFG0_DRDY_MODE       = 0x20, /* INT_CONFIG0 */
+    IIM42653_REG_INT_CFG0_DRDY_CLEAR_ON_STATUS = 0x00, /* INT_CONFIG0 */
     IIM42653_REG_INT_ASYNC_RESET_BIT      = 1U << 4, /* INT_CONFIG1 */
     IIM42653_REG_UI_DRDY_INT1_EN          = 0x08, /* INT_SOURCE0 */
     IIM42653_REG_WHO_AM_I_VALUE           = 0x44, /* WHO_AM_I */
@@ -151,7 +128,6 @@ enum
 {
     IIM42653_REG_GYRO_AAF_DIS   = 0x02, /* GYRO_CONFIG_STATIC2 */
     IIM42653_REG_GYRO_NF_DIS    = 0x01, /* GYRO_CONFIG_STATIC2 */
-    IIM42653_REG_NF_BW_SEL_MASK = 0x70, /* GYRO_CONFIG_STATIC10 */
     IIM42653_REG_I3C_EN_MASK    = 0x1F, /* INTF_CONFIG6 */
 };
 
@@ -163,7 +139,7 @@ enum
 
 enum
 {
-    IIM42653_BURST_LEN = 14,  /* TEMP(2) + ACCEL(6) + GYRO(6) */
+    IIM42653_BURST_LEN = 17,  /* TEMP(2) + ACCEL(6) + GYRO(6) + TMST(2) + INT_STATUS(1) */
 };
 
 /* ============
@@ -259,41 +235,14 @@ typedef enum
     IIM42653_TEMP_FILTER_BW_HZ_5    = 6,
 } iim42653_temp_filter_bw_t;
 
-/* Gyro notch filter bandwidth. Bits [6:4] of GYRO_CONFIG_STATIC10 (Bank 1, 0x13). */
-typedef enum
-{
-    IIM42653_NOTCH_BW_HZ_1449 = 0,
-    IIM42653_NOTCH_BW_HZ_680  = 1,
-    IIM42653_NOTCH_BW_HZ_329  = 2,
-    IIM42653_NOTCH_BW_HZ_162  = 3,
-    IIM42653_NOTCH_BW_HZ_80   = 4,
-    IIM42653_NOTCH_BW_HZ_40   = 5,
-    IIM42653_NOTCH_BW_HZ_20   = 6,
-    IIM42653_NOTCH_BW_HZ_10   = 7,
-} iim42653_notch_bw_t;
-
-/*
- * Anti-Alias Filter bandwidth preset: the three register parameters (DELT,
- * DELTSQR, BITSHIFT) the hardware needs for a given 3 dB bandwidth. Pick a row
- * from the AAF table in datasheet section 5.3; the three values are not
- * independent, so they must be copied together.
- */
+/* Anti-alias filter preset for one 3 dB bandwidth; the three values are coupled,
+ * so copy a whole row of the datasheet AAF table (section 5.3). */
 typedef struct
 {
     uint8_t  delt;
     uint16_t deltsqr;
     uint8_t  bitshift;
 } iim42653_aaf_bw_t;
-
-/*
- * Gyro notch filter configuration. Suppresses MEMS sense resonance noise
- * (1-3 kHz) per axis. freq_hz outside [1000, 3000] disables it.
- */
-typedef struct
-{
-    float               freq_hz; /* notch frequency in Hz (1000-3000), else disabled */
-    iim42653_notch_bw_t bw;      /* notch bandwidth */
-} iim42653_gyro_notch_config_t;
 
 /* ====================
  * Driver configuration
@@ -312,20 +261,11 @@ typedef struct
     iim42653_temp_filter_bw_t    temp_filter_bw;
     iim42653_aaf_bw_t            gyro_aaf;
     iim42653_aaf_bw_t            accel_aaf;
-    iim42653_gyro_notch_config_t gyro_notch;
     axes_remap_t                 axes;  /* sensor to body; configure() rejects a reflection */
-    bool                         enable_drdy_int1;
 } iim42653_config_t;
 
-/*
- * Default rocket-flight configuration (register-read mode):
- *   - Gyro:  +/-2000 dps @ 1 kHz, 2nd-order filter BW = ODR/4
- *   - Accel: +/-32 g    @ 1 kHz, 2nd-order filter BW = ODR/4
- *   - AAF:   ~536 Hz on both (rejects motor vibration aliasing)
- *   - Notch: enabled at MEMS resonance (~2.5 kHz), BW = 329 Hz
- *   - Temp filter: 40 Hz (low noise for slow-varying temperature)
- *   - DRDY interrupt on INT1, push-pull, active-high
- */
+/* Rocket defaults: +/-2000 dps and +/-32 g at 1 kHz, 2nd-order ODR/8 UI filters,
+ * 536 Hz AAF, factory notch, 40 Hz temperature filter; remap left unset. */
 iim42653_config_t iim42653_config_rocket_default(void);
 
 /* ==================
@@ -348,10 +288,7 @@ typedef struct
     float gyro_scale;  /* LSB -> rad/s */
 } iim42653_t;
 
-/*
- * Initialize the IMU: soft reset, WHO_AM_I check, interface config (SPI 4-wire,
- * big-endian), PLL clock select. false on comm failure or wrong WHO_AM_I.
- */
+/* Soft reset, WHO_AM_I check, SPI/clock interface setup; false on comm failure or wrong ID. */
 WARN_UNUSED bool iim42653_init(iim42653_t *self, SPI_HandleTypeDef *spi,
                                GPIO_TypeDef *cs_port, uint16_t cs_pin);
 
@@ -359,6 +296,7 @@ WARN_UNUSED bool iim42653_init(iim42653_t *self, SPI_HandleTypeDef *spi,
  * sensors are powered on at the end of this call. */
 WARN_UNUSED bool iim42653_configure(iim42653_t *self, const iim42653_config_t *cfg);
 
-/* Burst-read accel + gyro + temperature (14 bytes) and convert to SI units. */
+/* Burst-read temperature, accel, gyro and INT_STATUS; false on SPI error, invalid
+ * data, or no new sample since the last read. Converts to SI units. */
 WARN_UNUSED bool iim42653_read(iim42653_t *self, iim42653_sample_t *sample);
 

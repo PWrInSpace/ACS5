@@ -2,11 +2,10 @@
 /**
   ******************************************************************************
   * @file    usart.h
-  * @brief   UART for ACS5 — GNSS on UART7 (PE8 TX / PE7 RX).
+  * @brief   UART for ACS5 — on-board MAX-M10S GNSS on UART9 (PD15 TX / PD14 RX).
   *
-  * Schematic labels this port TX6/RX6 (board "UART6"); on the H725 those pads
-  * are UART7 AF7. PD14/PD15 are also labeled TX4/RX4 near the GPS sheet but
-  * have no UART TX/RX alternate function, so GNSS rides UART7.
+  * The GPS sheet nets TX4/RX4 (module TXD/RXD) land on PD14/PD15, which are
+  * UART9 AF11 on the H725. PE7/PE8 (TX6/RX6) go to the external "UART6" port.
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -25,16 +24,16 @@ extern "C" {
 
 /* USER CODE END Includes */
 
-extern UART_HandleTypeDef huart7;
+extern UART_HandleTypeDef huart9;
 
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
 
-void MX_UART7_Init(void);
+void MX_UART9_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-extern DMA_HandleTypeDef hdma_uart7_rx;
+extern DMA_HandleTypeDef hdma_uart9_rx;
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

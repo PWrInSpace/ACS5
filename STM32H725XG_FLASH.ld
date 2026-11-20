@@ -227,11 +227,18 @@ SECTIONS
   } >DTCMRAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
-  /* GNSS UART DMA RX ring — must live in AXI SRAM (DMA1 cannot touch DTCM). */
+  /* DMA-visible buffers (GNSS UART ring, SD FatFs) — AXI SRAM, since DMA1 and SDMMC1 IDMA cannot touch DTCM. */
   .dma_buf (NOLOAD) : ALIGN(32)
   {
     *(.dma_buf)
     *(.dma_buf*)
+  } >RAM_D1
+
+  /* Not zeroed at startup, so contents survive a system reset (fault record). */
+  .noinit (NOLOAD) : ALIGN(4)
+  {
+    *(.noinit)
+    *(.noinit*)
   } >RAM_D1
 
   PROVIDE( __bss_start = __tbss_start );

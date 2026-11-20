@@ -1,14 +1,12 @@
 #include "filter/attitude.h"
 
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 #include "utils/mathx.h"
 
 #include <math.h>
 
 #define Ki_acc          0.00002f
 #define BARO_VEL_ALPHA  0.02f
-#define ACCEL_TRUST_MIN (0.7f * GRAVITY)
-#define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
 attitude_config_t attitude_config_default(void)
 {
@@ -20,7 +18,10 @@ attitude_config_t attitude_config_default(void)
         .n_calib         = (int)SEC_TO_TICKS(20.0f),
         .require_calib   = true,
         .gyro_bias_tau_s     = 5.0f,
-        .gyro_bias_gate_rads = 0.035f,   /* 2 deg/s */
+        .still_rate_max_rads = 5.0f * DEG2RAD,
+        .still_tilt_rad      = 0.1f * DEG2RAD,
+        .still_mag_tol       = 0.05f,
+        .still_time_s        = 3.0f,
     };
 }
 
@@ -35,6 +36,7 @@ void attitude_init(attitude_t *est, const attitude_config_t *cfg)
     est->q           = quat_identity();
     est->last_good_q = quat_identity();
     est->calib.mag_mean = GRAVITY;
+    est->still_need_ticks = (uint32_t)(est->cfg.still_time_s / est->cfg.dt_s + 0.5f);
     mahony_init(&est->mahony);
 }
 
@@ -86,11 +88,6 @@ void attitude_reset(attitude_t *est)
     if (est->last_good_baro_alt_valid)
         est->pos[2] = est->last_good_baro_alt;
 
-    for (int i = 0; i < 3; i++) {
-        est->last_good_vel[i] = 0.0f;
-        est->last_good_pos[i] = est->pos[i];
-    }
-
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < ATTITUDE_N_AVG; j++)
             est->buf[i][j] = 0.0f;
@@ -106,14 +103,49 @@ void attitude_reset(attitude_t *est)
     /* Preserve quaternion, calib, gyro bias and mag reference (soft standby reset). */
 }
 
+/* True after still_time_s of continuous stillness. Gravity direction catches slow tilts;
+ * the rate gate catches rotation about the vertical, which gravity cannot see. */
+static bool pad_is_still(attitude_t *est, const float gyro[3], const float acc[3])
+{
+    const attitude_config_t *c = &est->cfg;
+    /* Right after attitude_reset the ring holds a few samples, too noisy to judge. */
+    if (est->buf_count < c->n_avg)
+        return est->still_ticks >= est->still_need_ticks;
+
+    const float g_ref = est->calib.done ? est->calib.mag_mean : GRAVITY;
+    const float mag   = sqrtf(acc[0]*acc[0] + acc[1]*acc[1] + acc[2]*acc[2]);
+
+    bool quiet = mag > 0.0f && fabsf(mag - g_ref) <= c->still_mag_tol * g_ref;
+    for (int i = 0; i < 3; i++)
+        quiet = quiet && fabsf(gyro[i]) <= c->still_rate_max_rads;
+
+    float u[3] = {0};
+    if (mag > 0.0f)
+        for (int i = 0; i < 3; i++) u[i] = acc[i] / mag;
+
+    if (quiet && est->still_anchor_valid) {
+        const float *a = est->still_anchor;
+        const float cx = u[1]*a[2] - u[2]*a[1];
+        const float cy = u[2]*a[0] - u[0]*a[2];
+        const float cz = u[0]*a[1] - u[1]*a[0];
+        quiet = (cx*cx + cy*cy + cz*cz) <= sinf(c->still_tilt_rad) * sinf(c->still_tilt_rad);
+    }
+
+    if (!quiet || !est->still_anchor_valid) {
+        for (int i = 0; i < 3; i++) est->still_anchor[i] = u[i];
+        est->still_anchor_valid = mag > 0.0f;
+        est->still_ticks = 0;
+        return false;
+    }
+    if (est->still_ticks < UINT32_MAX) est->still_ticks++;
+    return est->still_ticks >= est->still_need_ticks;
+}
+
 /* Running mean while few samples exist, then an EMA with gyro_bias_tau_s. */
-static void gyro_bias_update(attitude_t *est, const attitude_input_t *in)
+static void gyro_bias_update(attitude_t *est, const attitude_input_t *in, const float acc[3])
 {
     if (!in->zupt_active) return;
-    for (int i = 0; i < 3; i++)
-        if (fabsf(in->gyro_rads[i] - est->gyro_bias[i]) > est->cfg.gyro_bias_gate_rads &&
-            est->gyro_bias_n > 0u)
-            return;
+    if (!pad_is_still(est, in->gyro_rads, acc)) return;
 
     if (est->gyro_bias_n < UINT32_MAX) est->gyro_bias_n++;
     float alpha = fmaxf(1.0f / (float)est->gyro_bias_n,
@@ -130,6 +162,7 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     if (!isfinite(dt) || dt <= 0.0001f) return;
 
     if (!in->imu_valid) {
+        est->rate_fresh = false;
         est->imu_stale_ticks++;
         if ((float)est->imu_stale_ticks * dt > est->cfg.imu_max_stale_s)
             est->q_valid = false;
@@ -139,24 +172,9 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
 
     const float alpha = est->baro_alpha;
 
-    for (int i = 0; i < 3; i++) {
-        if (!isfinite(est->vel[i])) est->vel[i] = est->last_good_vel[i];
-        if (!isfinite(est->pos[i])) est->pos[i] = est->last_good_pos[i];
-    }
-
     float raw_ax = isfinite(in->accel_mps2[0]) ? in->accel_mps2[0] : est->last_good_acc_original[0];
     float raw_ay = isfinite(in->accel_mps2[1]) ? in->accel_mps2[1] : est->last_good_acc_original[1];
     float raw_az = isfinite(in->accel_mps2[2]) ? in->accel_mps2[2] : est->last_good_acc_original[2];
-
-    float gx, gy, gz;
-    if (isfinite(in->gyro_rads[0]) && isfinite(in->gyro_rads[1]) && isfinite(in->gyro_rads[2])) {
-        gyro_bias_update(est, in);
-        gx = in->gyro_rads[0] - est->gyro_bias[0];
-        gy = in->gyro_rads[1] - est->gyro_bias[1];
-        gz = in->gyro_rads[2] - est->gyro_bias[2];
-    } else {
-        gx = est->prev_gyro[0]; gy = est->prev_gyro[1]; gz = est->prev_gyro[2];
-    }
 
     float baro_alt = in->baro_alt_m;
     if (isfinite(baro_alt)) {
@@ -184,20 +202,24 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     est->acc_original[1] = avg[1];
     est->acc_original[2] = avg[2];
 
+    float gx, gy, gz;
+    est->rate_fresh = isfinite(in->gyro_rads[0]) && isfinite(in->gyro_rads[1]) &&
+                      isfinite(in->gyro_rads[2]);
+    if (est->rate_fresh) {
+        gyro_bias_update(est, in, avg);
+        gx = in->gyro_rads[0] - est->gyro_bias[0];
+        gy = in->gyro_rads[1] - est->gyro_bias[1];
+        gz = in->gyro_rads[2] - est->gyro_bias[2];
+    } else {
+        gx = est->prev_gyro[0]; gy = est->prev_gyro[1]; gz = est->prev_gyro[2];
+    }
+
     if (in->collecting_calib)
         calib_push(est, avg);
 
     if (!est->q_valid) {
-        /* Seeding reads the accelerometer as gravity, so it is gated with the
-         * corrections: an IMU stall that clears mid-coast would otherwise
-         * rebuild the attitude out of the drag vector and then call it valid.
-         *
-         * That leaves nothing to rebuild from in flight, so validity instead
-         * comes back from the quaternion already held. It was never corrupted -
-         * a stall stops it being advanced, it does not corrupt it - and the cost
-         * is the drift accumulated over the stall. The alternative is an
-         * unrecoverable loss of attitude for the rest of the flight, which the
-         * roll controller has no answer to at all. */
+        /* In flight, validity returns on the held quaternion, not a gravity reseed:
+         * docs/design.md#attitude-recovery-after-an-imu-stall */
         if (in->corrections_inhibited) {
             if (quat_finite(est->q))
                 est->q_valid = true;
@@ -238,10 +260,8 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
         accel_world[i] -= est->acc_bias_w[i];
 
     const float MAX_ACCEL = 200.0f * 9.81f;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++)
         est->acc[i] = clampf(accel_world[i], -MAX_ACCEL, MAX_ACCEL);
-        est->last_good_acc[i] = est->acc[i];
-    }
 
     if (in->zupt_active && est->q_valid && accel_trustworthy) {
         for (int i = 0; i < 3; i++)
@@ -251,42 +271,32 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     }
 
     if (!est->baro_inited && in->baro_valid) {
-        est->pos[2]           = baro_alt;
-        est->last_good_pos[2] = baro_alt;
-        est->prev_baro_alt    = baro_alt;
-        est->baro_inited      = true;
+        est->pos[2]      = baro_alt;
+        est->baro_inited = true;
     }
 
-    for (int i = 0; i < 3; i++) {
-        est->vel[i]          += est->acc[i] * dt;
-        est->last_good_vel[i] = est->vel[i];
-    }
+    for (int i = 0; i < 3; i++)
+        est->vel[i] += est->acc[i] * dt;
 
     if (in->zupt_active) {
         est->vel[0] = 0.0f;
         est->vel[1] = 0.0f;
         est->pos[0] = 0.0f;
         est->pos[1] = 0.0f;
-        est->last_good_vel[0] = est->last_good_vel[1] = 0.0f;
-        est->last_good_pos[0] = est->last_good_pos[1] = 0.0f;
     }
 
     if (est->baro_inited && in->baro_vel_valid && isfinite(in->baro_vel_z)) {
         est->vel[2] = (1.0f - BARO_VEL_ALPHA) * est->vel[2]
                     + BARO_VEL_ALPHA          * in->baro_vel_z;
-        est->last_good_vel[2] = est->vel[2];
     }
 
     est->pos[0] += est->vel[0] * dt;
     est->pos[1] += est->vel[1] * dt;
-    est->last_good_pos[0] = est->pos[0];
-    est->last_good_pos[1] = est->pos[1];
 
     float imu_pos_z = est->pos[2] + est->vel[2] * dt;
     est->pos[2] = (est->baro_inited && in->baro_valid)
                 ? alpha * imu_pos_z + (1.0f - alpha) * baro_alt
                 : imu_pos_z;
-    est->last_good_pos[2] = est->pos[2];
 
     est->ang_vel[0] = gx; est->ang_vel[1] = gy; est->ang_vel[2] = gz;
     est->prev_gyro[0] = gx; est->prev_gyro[1] = gy; est->prev_gyro[2] = gz;

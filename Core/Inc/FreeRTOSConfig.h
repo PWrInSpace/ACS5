@@ -153,7 +153,10 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 /* Normal assert() semantics without relying on the provision of an assert.h
 header file. */
 /* USER CODE BEGIN 1 */
-#define configASSERT( x ) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for( ;; );}
+#if !defined(__ASSEMBLER__)
+void fault_record_assert(const char *file, int line) __attribute__((noreturn));
+#endif
+#define configASSERT( x ) if ((x) == 0) { fault_record_assert(__FILE__, __LINE__); }
 /* USER CODE END 1 */
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
@@ -167,9 +170,9 @@ standard names. */
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 
-/* Two tasks format floats (the aggregator's printf and the SD task's
+/* Two tasks format floats (the flight task's printf and the SD task's
  * snprintf). A shared newlib reent puts them on one _dtoa/Balloc freelist,
- * which the preempting aggregator can corrupt mid-allocation. */
+ * which the preempting flight task can corrupt mid-allocation. */
 #define configUSE_NEWLIB_REENTRANT 1
 /* USER CODE END Defines */
 

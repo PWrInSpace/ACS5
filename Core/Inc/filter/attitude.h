@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 #include "filter/mahony.h"
 
 /* Public attitude / nav estimator facade. Call sites pull from filter/;
@@ -18,8 +18,11 @@ typedef struct
     int   n_calib;          /* pad gravity samples before seeding quat */
     bool  require_calib;    /* flight: true; host tests may set false */
     float gyro_bias_tau_s;  /* pad gyro-bias averaging time constant */
-    float gyro_bias_gate_rads; /* samples further than this from the bias are
-                                * motion, not bias, and are skipped */
+    /* Pad stillness, required before the gyro bias learns: */
+    float still_rate_max_rads; /* |gyro| per axis below this */
+    float still_tilt_rad;      /* gravity direction within this of its anchor */
+    float still_mag_tol;       /* |accel| within this fraction of g */
+    float still_time_s;        /* ...continuously for this long */
 } attitude_config_t;
 
 attitude_config_t attitude_config_default(void);
@@ -35,10 +38,8 @@ typedef struct
     bool  baro_vel_valid;
     bool  imu_valid;        /* false = accel/gyro are a held stale sample */
     bool  mag_valid;
-    /* Set while the accelerometer is not measuring gravity - powered flight and
-     * coast. Inhibits the accel and mag corrections and the gravity seeding,
-     * leaving the quaternion to the gyro. Phrased as an inhibit so a zeroed
-     * input struct keeps the corrections on, which is what standby needs. */
+    /* Accelerometer not measuring gravity (boost, coast): no accel/mag correction or gravity
+     * seeding. Phrased as an inhibit so a zeroed input struct keeps standby behaviour. */
     bool  corrections_inhibited;
     bool  collecting_calib; /* STANDBY and calib not finished */
     bool  zupt_active;      /* STANDBY - clamp XY vel/pos, estimate accel bias */
@@ -67,6 +68,7 @@ typedef struct
     float  vel[3];
     float  pos[3];
     float  ang_vel[3];        /* body rates */
+    bool   rate_fresh;        /* ang_vel was measured this tick, not held */
 
     attitude_grav_calib_t calib;
 
@@ -79,26 +81,25 @@ typedef struct
     int    buf_idx, buf_count;
     int    imu_stale_ticks;
     float  last_good_acc_original[3];
-    float  last_good_acc[3];
-    float  last_good_vel[3], last_good_pos[3];
     float  last_good_baro_alt;
     bool   last_good_baro_alt_valid;
 
     mahony_t mahony;          /* attitude backend state (Mahony today) */
     float  acc_bias_w[3];
-    /* Learned on the pad (zupt_active), frozen after: in flight the vertical is gyro-only. */
+    /* Learned on the pad while still, frozen after: in flight the vertical is gyro-only. */
     float  gyro_bias[3];
     uint32_t gyro_bias_n;     /* samples averaged so far, saturating */
-    float  prev_baro_alt;
+    float  still_anchor[3];   /* unit gravity direction where the still run began */
+    bool   still_anchor_valid;
+    uint32_t still_ticks;     /* consecutive still ticks, saturating */
+    uint32_t still_need_ticks;
 } attitude_t;
 
 void attitude_init(attitude_t *est, const attitude_config_t *cfg);
 void attitude_update(attitude_t *est, const attitude_input_t *in);
 
-/* Soft standby reset: clears kinematics / bias / ring; preserves quat + calib. */
+/* Soft standby reset: clears kinematics, accel bias and ring; keeps quat, calib and gyro bias. */
 void attitude_reset(attitude_t *est);
 
-/* ZYX Euler angles [rad] of the current attitude; out[2] is roll about body Z.
- * Nothing in the control path consumes these - they exist for the log, so call
- * this at the log rate rather than every tick. */
+/* ZYX Euler angles [rad] of the current attitude, for logging; out[2] is roll about body Z. */
 void attitude_euler(const attitude_t *est, float out[3]);

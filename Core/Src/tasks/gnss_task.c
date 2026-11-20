@@ -1,7 +1,4 @@
-/*
- * ACS5 - GNSS task. Owns the FreeRTOS boundary for the MAX-M10S driver.
- *
- */
+/* GNSS task: the FreeRTOS boundary for the MAX-M10S driver. */
 
 
 #include <assert.h>
@@ -28,19 +25,14 @@ static UART_HandleTypeDef *volatile s_huart;
 
 #define GNSS_TASK_WAKE_TIMEOUT_MS    1000u
 #define GNSS_CONFIG_RETRY_DELAY_MS   2000u   /* pause between configuration attempts */
+/* No frame for this long means the module reset and lost its RAM configuration. */
+#define GNSS_SILENCE_REINIT_MS       3000u
 
-/* NED datum and its capture request. Owned by this task; the request flag is
- * set from another task by gnss_capture_datum(). Zero-initialised, so the datum
- * starts out invalid. */
+/* NED datum (owned by this task) and the capture request set by gnss_capture_datum(). */
 static geo_ned_datum_t   s_datum;
 static volatile bool s_capture_pending;
 
-/*-------------------------------------------------------------- UART events
- *
- * The HAL's UART callbacks are global (one definition per program), so they live
- * in one central place, usart.c, which forwards each event to whichever module
- * owns that UART. These two are the GNSS module's part; both run in interrupt
- * context and ignore any UART that is not the GNSS one. */
+/*-------------------------------------------------------------- UART events */
 
 // A receive-to-idle event: new bytes are waiting in the DMA buffer.
 void gnss_task_on_uart_rx_event(UART_HandleTypeDef *huart)
@@ -49,9 +41,8 @@ void gnss_task_on_uart_rx_event(UART_HandleTypeDef *huart)
         osSemaphoreRelease(s_gnss_idle_sem);
 }
 
-// A UART receive error (overrun, noise, framing...). The HAL has already aborted
-// the DMA, so no idle event will ever come again unless the driver restarts
-// reception: flag it and wake the task to do so.
+// The HAL has already aborted the DMA, so no idle event comes until the driver
+// restarts reception: flag it and wake the task.
 void gnss_task_on_uart_error(UART_HandleTypeDef *huart)
 {
     if (huart == s_huart)
@@ -61,20 +52,13 @@ void gnss_task_on_uart_error(UART_HandleTypeDef *huart)
     }
 }
 
-/* -------------------------------------------------------------- capture datum
- *
- * Called by the flight state machine when the rocket is on the 
- * pad with a confirmed 3D fix. The task latches
- * the datum from the next valid fix. */
+/* -------------------------------------------------------------- capture datum */
 void gnss_capture_datum(void)
 {
     s_capture_pending = true;
 }
 
-/* -------------------------------------------------------------------- init
- *
- * Creates the RTOS objects the other tasks and the UART callbacks depend on.
- * Called before the kernel starts, so none of them can run before these exist. */
+/* -------------------------------------------------------------------- init */
 bool gnss_init(UART_HandleTypeDef *huart)
 {
     assert(huart != NULL);
@@ -96,11 +80,7 @@ bool gnss_init(UART_HandleTypeDef *huart)
     return true;
 }
 
-/* ----------------------------------------------------------------- get fix
- *
- * Non-blocking so a low-rate consumer (the logger) can never be stalled by the
- * GNSS task holding the mutex. Safe to call before gnss_init(): the mutex does
- * not exist yet, so it just returns false. */
+/* ----------------------------------------------------------------- get fix */
 bool gnss_get_fix(gnss_fix_t *out)
 {
     if (out == NULL || s_fix_mutex == NULL)
@@ -114,8 +94,7 @@ bool gnss_get_fix(gnss_fix_t *out)
 
 /*-------------------------------------------------------------------- task */
 
-// Publishes the link state without touching the rest of the snapshot, so the
-// rest of the system can tell "module not working" from "no fix yet".
+// Publishes the link state without touching the rest of the snapshot.
 static void publish_link(gnss_link_t link, uint8_t error, uint8_t failures)
 {
     osMutexAcquire(s_fix_mutex, osWaitForever);
@@ -126,11 +105,8 @@ static void publish_link(gnss_link_t link, uint8_t error, uint8_t failures)
     osMutexRelease(s_fix_mutex);
 }
 
-// Brings the module up, retrying for as long as it takes (it may be powered
-// late, or the link may glitch) and saying so to everyone who reads the fix.
-// Only configure() is repeated once the driver is initialised: it restarts the
-// receive itself, so it is safe to call again. Returns the number of failed
-// attempts (saturating).
+// Brings the module up, retrying forever and publishing each failure; returns
+// the failed attempts (saturating).
 static uint8_t bring_up_module(void)
 {
     uint8_t failures = 0;
@@ -174,8 +150,7 @@ static void latch_datum_if_requested(const ubx_nav_pvt_t *pvt)
     }
 }
 
-// Fills *snap from a decoded NAV-PVT (kept whole), the NED datum and the driver's
-// counters.
+// Fills *snap from a decoded NAV-PVT, the NED datum and the driver's counters.
 static void build_snapshot(const ubx_nav_pvt_t *pvt, uint8_t failures, gnss_fix_t *snap)
 {
     *snap = (gnss_fix_t){0};
@@ -211,7 +186,8 @@ void gnss_task(void *arg)
     (void)arg;
     assert(s_huart != NULL && "gnss_init() must run before the task starts");
 
-    const uint8_t failures = bring_up_module();
+    uint8_t  failures   = bring_up_module();
+    uint32_t last_frame = HAL_GetTick();
 
     for (;;)
     {
@@ -219,9 +195,17 @@ void gnss_task(void *arg)
         // event arrives while the DMA is stopped.
         (void)osSemaphoreAcquire(s_gnss_idle_sem, GNSS_TASK_WAKE_TIMEOUT_MS);
 
+        if ((uint32_t)(HAL_GetTick() - last_frame) > GNSS_SILENCE_REINIT_MS)
+        {
+            publish_link(GNSS_LINK_FAILED, (uint8_t)MAX_M10S_ERR_TIMEOUT, failures);
+            failures   = bring_up_module();
+            last_frame = HAL_GetTick();
+        }
+
         max_m10s_frame_t frame;
         while (max_m10s_drain(&s_drv, &frame))
         {
+            last_frame = HAL_GetTick();
             if (!is_nav_pvt(&frame))
                 continue;
 

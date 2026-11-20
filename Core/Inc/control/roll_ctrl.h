@@ -3,11 +3,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 
-/* Trapezoidal setpoint profile.
- * Shapes the commanded roll angle so the cascade tracks a feasible
- * trajectory instead of a 90 deg step (which would saturate the canards). */
+/* Trapezoidal roll-angle setpoint profile; a bare step would saturate the canards. */
 typedef struct
 {
     float target;      /* rad */
@@ -22,21 +20,14 @@ void roll_profile_init(roll_profile_t *p, float target_rad,
                        float max_rate_rads, float max_accel_rads2);
 void roll_profile_step(roll_profile_t *p, float dt_s);
 
-/* Maneuver sequencer + cascade controller.
- * DAMP:   inner rate loop, setpoint 0 - pure rate damping.
- * ROTATE: capture q_ref, track the trapezoid profile via
- *         angle-P + rate feedforward -> inner rate PI.
- * HOLD:   angle-P at the 90 deg target, held until apogee.
- * ABORT:  pure rate damping. A data fault resumes the same maneuver after
- *         recover_debounce_ticks of healthy data; an over-limit rate latches
- *         for the rest of the armed window. */
+/* Maneuver sequencer phases of the cascade controller. */
 typedef enum
 {
     ROLL_CTRL_IDLE   = 0,
-    ROLL_CTRL_DAMP   = 1,
-    ROLL_CTRL_ROTATE = 2,
-    ROLL_CTRL_HOLD   = 3,
-    ROLL_CTRL_ABORT  = 4,
+    ROLL_CTRL_DAMP   = 1,  /* inner rate loop, setpoint 0 */
+    ROLL_CTRL_ROTATE = 2,  /* capture q_ref, track the profile: angle-P + rate feedforward */
+    ROLL_CTRL_HOLD   = 3,  /* angle-P at the target until apogee */
+    ROLL_CTRL_ABORT  = 4,  /* rate damping; data faults resume, overspeed latches */
 } roll_ctrl_phase_t;
 
 typedef struct
@@ -50,42 +41,23 @@ typedef struct
     float profile_max_rate_rads;
     float profile_max_accel_rads2;
     float abort_rate_rads;          /* |p| above this -> ABORT (safety) */
-    /* Consecutive healthy ticks before a data-fault ABORT resumes. Much longer
-     * than the abort debounce on purpose: without that asymmetry an intermittent
-     * fault thrashes the sequencer across ABORT for the whole coast. */
+    /* Consecutive healthy ticks before a data-fault ABORT resumes; much longer than
+     * the abort debounce: docs/design.md#fault-debounce-and-recovery */
     uint16_t recover_debounce_ticks;
     uint16_t abort_debounce_ticks;  /* consecutive faulted ticks before ABORT;
-                                       1 aborts on the first faulted tick.
-                                       roll_ctrl_init clamps 0 up to 1 - there
-                                       is no value that disables the aborts. */
+                                       roll_ctrl_init clamps 0 up to 1 */
 
     /* cascade */
     float kp_angle;                 /* outer P, [1/s] */
     float rate_limit_rads;          /* outer output clamp */
     float kp_rate;                  /* inner P */
-    /* Rate-loop integrator. A steady aero trim torque otherwise leaves a
-     * standing rate error, and the DAMP->ROTATE gate turns that error into a
-     * pass/fail on the whole maneuver: the trim only has to exceed
-     * kp_rate * settle_rate_rads of equivalent deflection to hold the sequencer
-     * in DAMP for the entire coast. On this airframe a quarter degree of aft-fin
-     * misalignment is already past that. */
+    /* Rate-loop integrator; cancels standing trim: docs/design.md#rate-integrator */
     float ki_rate;                  /* [rad per (rad/s * s)] */
     float rate_int_limit_rad;       /* integrator clamp, deflection units */
-    /* Gain scheduling on dynamic pressure. Canard authority is proportional to
-     * qbar, which falls by more than an order of magnitude across this coast -
-     * 3634 Pa at burnout, 350 Pa five seconds later - so a fixed gain is correct
-     * at one instant of the flight and wrong at every other. Scaling the rate
-     * loop by qbar_ref/qbar holds the loop gain where it was tuned.
-     *
-     * The clamp is not optional: the ratio diverges as qbar goes to zero, and an
-     * unbounded gain near apogee would chase gyro noise into the stops. */
+    /* Rate-loop gain is scaled by qbar_ref/qbar, clamped: docs/design.md#gain-scheduling-on-dynamic-pressure */
     float qbar_ref_pa;              /* qbar the gains were tuned at */
     float gain_scale_min, gain_scale_max;
-    /* Below this the proportional path is dropped and the canards hold only the
-     * integrator's trim correction: there is no longer authority worth chasing
-     * noise for, but a standing trim scales with qbar exactly as the canards do,
-     * so the deflection that cancels it stays valid all the way to apogee. */
-    float qbar_floor_pa;
+    float qbar_floor_pa;            /* below: P path dropped, trim held (docs/design.md#qbar-floor) */
     float target_lpf_alpha;         /* inner low-pass */
     float max_deflection_rad;       /* canard hard limit */
     float deflection_slew_rads;     /* canard slew limit */
@@ -98,16 +70,15 @@ typedef struct
     quat_t q;                /* current attitude (body->world) */
     bool   q_valid;          /* estimator gravity-init complete + finite */
     float  roll_rate_rads;   /* body-Z gyro, rad/s */
-    /* Dynamic pressure, Pa. Zero or negative means the caller has none to
-     * offer: scheduling off, scale 1, floor not applied. A zeroed input struct
-     * must not silently stand the canards down. */
+    /* roll_rate_rads is held, not measured this tick. Phrased as stale so a zeroed
+     * input struct reads as healthy. */
+    bool   rate_stale;
+    /* Dynamic pressure, Pa. <= 0 means none: scheduling off, scale 1, no floor, so a
+     * zeroed input struct does not stand the canards down. */
     float  qbar_pa;
-    bool   maneuver_enabled; /* From ctrl_arm: burnout plus the canard-lock delay.
-                                Must be one-way per flight, and nothing here
-                                enforces it: false clears the controller state, so
-                                re-arming drops a latched ABORT and captures a
-                                fresh q_ref - another 90 deg from wherever it then
-                                points. */
+    /* From ctrl_arm. Must be one-way per flight, unenforced here: false clears all
+     * state, so re-arming drops a latched ABORT and captures a fresh q_ref. */
+    bool   maneuver_enabled;
 } roll_ctrl_input_t;
 
 typedef struct
@@ -137,14 +108,12 @@ typedef struct
     float  filtered_target;
     float  current_delta;
     float  rate_integrator;
-    /* Applied rate-loop multiplier. Not logged directly - the log carries baro
-     * pressure, temperature and velocity, so qbar and hence this follow from it. */
+    /* Applied rate-loop multiplier; not logged, recomputable from logged baro and velocity. */
     float  gain_scale;
     bool   below_qbar_floor;      /* proportional path dropped, trim held */
 } roll_ctrl_t;
 
 void  roll_ctrl_init(roll_ctrl_t *rc, const roll_ctrl_config_t *cfg);
 
-/* One control tick of cfg.dt_s. Returns the commanded canard deflection [rad], identical
- * for all four fins. */
+/* One control tick of cfg.dt_s. Returns the canard deflection [rad], identical for all four fins. */
 float roll_ctrl_step(roll_ctrl_t *rc, const roll_ctrl_input_t *in);

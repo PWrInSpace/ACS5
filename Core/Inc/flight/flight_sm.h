@@ -1,0 +1,76 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+
+/* Logged as uint8_t and decoded numerically post-flight, so do not renumber. */
+typedef enum
+{
+    FLIGHT_STATE_STANDBY      = 0,
+    FLIGHT_STATE_ACCELERATION = 1,
+    FLIGHT_STATE_FREE_FLIGHT  = 2,
+    FLIGHT_STATE_FALLING      = 3,
+    FLIGHT_STATE_RECOVERY     = 4,
+} flight_state_t;
+
+typedef struct
+{
+    float    launch_accel_mps2;   /* STANDBY->ACCEL when az exceeds this */
+    int      launch_debounce;     /* consecutive ticks required */
+    float    burnout_accel_mps2;  /* ACCEL->FREE_FLIGHT when az at/below this */
+    int      burnout_debounce;
+    float    apogee_vel_mps;      /* baro-derived vz below this ... */
+    float    apogee_alt_drop_m;   /* ... AND this far below peak -> FALLING */
+    float    recovery_vel_mps;    /* FALLING->RECOVERY when vz above this */
+    int      recovery_debounce;
+    float    baro_vel_tau_s;      /* vz low-pass time constant, s */
+    float    baro_vel_min_span_s; /* shortest span the vz difference is taken over, s */
+    uint32_t post_falling_timeout_ticks;  /* mission_complete latches this long after FALLING entry */
+    uint32_t max_coast_ticks;     /* FREE_FLIGHT->FALLING regardless of baro */
+    /* After launch_confirm_ticks in ACCELERATION, back to STANDBY if the baro climbed
+     * less than launch_confirm_baro_m AND the IMU climb is below launch_confirm_imu_m. */
+    uint32_t launch_confirm_ticks;
+    float    launch_confirm_baro_m;
+    float    launch_confirm_imu_m;
+} flight_sm_config_t;
+
+flight_sm_config_t flight_sm_config_default(void);
+
+typedef struct
+{
+    float az_mps2;      /* body-Z accel, ring-buffer averaged (acc_original[2]) */
+    float alt_m;        /* fused altitude (estimator pos[2]) */
+    float baro_alt_m;   /* raw barometric altitude */
+    bool  baro_fresh;   /* new baro sample this tick */
+    float baro_dt_s;    /* measured baro publish interval, s; valid when baro_fresh */
+    float vel_z_mps;    /* estimator vertical velocity; seeds baro_vel_z at burnout */
+} flight_sm_input_t;
+
+typedef struct
+{
+    flight_sm_config_t cfg;
+    flight_state_t     state;
+    int      launch_count, burnout_count, recovery_count;
+    float    peak_alt;
+    float    prev_baro_alt;
+    float    baro_span_s;         /* elapsed time since prev_baro_alt was taken */
+    float    baro_vel_z;
+    bool     baro_vel_seeded;
+    uint32_t tick;
+    uint32_t falling_entry_tick;
+    uint32_t coast_entry_tick;
+    bool     mission_complete;
+
+    /* launch confirmation */
+    float    pad_baro_alt;        /* last finite baro altitude seen in STANDBY */
+    bool     pad_baro_valid;
+    uint32_t launch_tick;
+    float    boost_baro_max;      /* highest baro altitude since launch */
+    bool     boost_baro_seen;
+    float    boost_imu_v, boost_imu_h;  /* IMU-integrated climb since launch */
+    uint32_t false_launch_count;
+} flight_sm_t;
+
+void        flight_sm_init(flight_sm_t *sm, const flight_sm_config_t *cfg);
+bool        flight_sm_step(flight_sm_t *sm, const flight_sm_input_t *in);
+const char *flight_state_name(flight_state_t s);

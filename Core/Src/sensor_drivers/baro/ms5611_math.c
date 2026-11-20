@@ -1,4 +1,4 @@
-#include "baro/ms5611_math.h"
+#include "sensor_drivers/baro/ms5611_math.h"
 
 #include <math.h>
 #include <string.h>
@@ -83,4 +83,12 @@ float ms5611_interval_s(uint32_t now_us, uint32_t prev_us)
     float dt_s = (float)(now_us - prev_us) * 1e-6f;
     if (dt_s <= MS5611_MIN_INTERVAL_S || dt_s >= MS5611_MAX_INTERVAL_S) return 0.0f;
     return dt_s;
+}
+
+bool ms5611_prom_plausible(const uint16_t prom[8])
+{
+    for (int i = 1; i <= 6; i++)
+        if (prom[i] == 0x0000u || prom[i] == 0xFFFFu)
+            return false;
+    return true;
 }

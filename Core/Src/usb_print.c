@@ -11,9 +11,8 @@ osMutexId_t usb_print_mutex;
 volatile uint8_t print_flag = 1u;
 
 void usb_print_init(void) {
-    /* Recursive: USB_PRINTF may be reached from a printf-ing helper that the
-     * caller already holds the mutex for. PrioInherit: the control-loop
-     * prints, so a low-priority holder must not block it unbounded. */
+    /* Recursive: a printf-ing helper may run under the caller's lock. PrioInherit:
+     * the control loop prints and must not wait unbounded on a low-priority holder. */
     const osMutexAttr_t attributes = {
         "usbPrintMutex",
         osMutexRecursive | osMutexPrioInherit,
@@ -25,10 +24,8 @@ void usb_print_init(void) {
     print_flag = 1u;
 }
 
-/* Producer is any printf-ing task via _write; consumer is the USB transmit-
- * complete interrupt. Indices move with interrupts off, so the interleaving is
- * safe whatever priority the OTG IRQ runs at. A full ring drops the newest
- * bytes: the 500 Hz control loop must never wait on debug output. */
+/* Indices move with interrupts off, whatever the OTG IRQ priority. A full ring
+ * drops the newest bytes: the control loop must never wait on debug output. */
 #define USB_TX_RING_SIZE  2048u
 #define USB_TX_CHUNK_SIZE 256u
 
@@ -98,4 +95,13 @@ void usb_print_tx_complete(void)
     tx_active = false;
     kick_locked();
     __set_PRIMASK(primask);
+}
+
+/* newlib stdout hook: printf() goes to the USB CDC ring. */
+int _write(int file, char *ptr, int len)
+{
+    (void)file;
+    if (len > 0)
+        usb_print_write((const uint8_t *)ptr, (uint16_t)len);
+    return len;
 }
