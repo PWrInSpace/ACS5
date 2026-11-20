@@ -39,13 +39,16 @@ extern osThreadId_t sdTaskHandle;
 static void camera_set_enabled(bool on)
 {
     GPIO_PinState s = on ? GPIO_PIN_SET : GPIO_PIN_RESET;
-#if 0
-    HAL_GPIO_WritePin(CAM1_GPIO_Port, CAM1_Pin, s); /* PC0 */
-#endif
     HAL_GPIO_WritePin(CAM2_GPIO_Port, CAM2_Pin, s); /* PC1 */
-#if 0
-    HAL_GPIO_WritePin(CAM3_GPIO_Port, CAM3_Pin, s); /* PC2 */
-#endif
+}
+
+static void halt_forever(const char *msg)
+{
+    for (;;)
+    {
+        USB_PRINTF("[FATAL] %s\r\n", msg);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }
 
 /* -- Timing & Logging ----------------------------------------------------- */
@@ -151,11 +154,7 @@ void StartAggregator(void *argument)
     /* configure() rejects a bad remap the same way it rejects a dead part, and
      * BOARD_*_REMAP is a build-time constant - say which one it is. */
     if (!axes_remap_is_rotation(&imu_cfg.axes))
-        for (;;)
-        {
-            USB_PRINTF("[FATAL] BOARD_IMU_REMAP is not a rotation - check axes.h\r\n");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
+        halt_forever("BOARD_IMU_REMAP is not a rotation - check axes.h");
     bool imu_up = false;
     for (int attempt = 1; attempt <= 3 && !imu_up; attempt++)
     {
@@ -170,13 +169,7 @@ void StartAggregator(void *argument)
             vTaskDelay(pdMS_TO_TICKS(100));
     }
     if (!imu_up)
-    {
-        for (;;)
-        {
-            USB_PRINTF("[FATAL] IMU dead - control loop not started\r\n");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
+        halt_forever("IMU dead - control loop not started");
     USB_PRINTF("[OK] IMU Initialized\r\n");
 
     /* -- Barometer -------------------------------------------------------- */
@@ -204,13 +197,7 @@ void StartAggregator(void *argument)
     servo_t75_config_t servo_cfg = servo_t75_config_rocket_default();
     if (!servo_bank_t75_init(&g_servos, &htim3, &servo_cfg) ||
         !canard_lock_init(&htim2))
-    {
-        for (;;)
-        {
-            USB_PRINTF("[FATAL] Servo / lock PWM init failed\r\n");
-            vTaskDelay(pdMS_TO_TICKS(1000));
-        }
-    }
+        halt_forever("Servo / lock PWM init failed");
 
     canard_lock_set_us(CANARD_LOCK_US_UNLOCKED);
     osDelay(3000);
@@ -401,7 +388,7 @@ void StartAggregator(void *argument)
             /* Launch / leave pad: stop USB prints for the rest of the flight.
              * Cleared after the transition line so that last message still goes out. */
             if (g_sm.state != FLIGHT_STATE_STANDBY)
-                print_flag = 1u;
+                print_flag = 0u;
 
             /* Power SPLIT V3 camera(s) as soon as we leave the pad. */
             if (!camera_on && g_sm.state != FLIGHT_STATE_STANDBY)

@@ -1,5 +1,5 @@
 /*
- * ACS4 Flight Computer - IIM-42653 IMU Driver
+ * IIM-42653 IMU Driver
  *
  * SPI transactions go through spi_dev; this file owns only the register map.
  * Timing: vTaskDelay for ms sleeps, DWT busy-wait for us sleeps.
@@ -87,7 +87,6 @@ static bool    iim42653_gyro_notch_is_enabled(const iim42653_gyro_notch_config_t
  * and set to read, which is what spi_dev implements. */
 #define IIM42653_MAX_SCK_HZ 24000000U   /* datasheet: "maximum frequency of SCLK" */
 
-static const float DEG_TO_RAD  = 0.017453292519943295f; /* pi/180 */
 static const float TEMP_SCALE  = 1.0f / 132.48f;
 static const float TEMP_OFFSET = 25.0f;
 
@@ -237,7 +236,7 @@ static float accel_sensitivity(iim42653_accel_fsr_t fsr)
 
 static void compute_scale_factors(iim42653_t *self)
 {
-    self->gyro_scale  = DEG_TO_RAD / gyro_sensitivity(self->config.gyro_fsr);
+    self->gyro_scale  = DEG2RAD / gyro_sensitivity(self->config.gyro_fsr);
     self->accel_scale = GRAVITY / accel_sensitivity(self->config.accel_fsr);
 }
 

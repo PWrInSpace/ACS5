@@ -1,7 +1,5 @@
-// Sanity anchors for the extracted complementary filter: gravity alignment,
-// gyro integration, NaN hardening. Tolerances are loose - this guards the
-// extraction, not filter quality.
-#include <assert.h>
+// Attitude estimator: gravity seeding, gyro integration, NaN hardening, pad gyro bias.
+#include "test_assert.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -29,18 +27,18 @@ static void test_gravity_init_level(void)
     cfg.n_avg = 4;
     attitude_t est;
     attitude_init(&est, &cfg);
-    assert(!est.q_valid);
+    CHECK(!est.q_valid);
 
     attitude_input_t in = level_input();
     for (int i = 0; i < 8; i++) attitude_update(&est, &in);
 
-    assert(est.q_valid);
+    CHECK(est.q_valid);
     float euler[3];
     attitude_euler(&est, euler);
-    assert(fabsf(euler[0]) < 0.05f);   /* roll ~0 */
-    assert(fabsf(euler[1]) < 0.05f);   /* pitch ~0 */
+    CHECK_NEAR(euler[0], 0.0f, 0.05f);   /* roll ~0 */
+    CHECK_NEAR(euler[1], 0.0f, 0.05f);   /* pitch ~0 */
     /* An inverted Z reaches the same two Euler angles through a 180 deg flip. */
-    assert(est.q.w > 0.99f);
+    CHECK(est.q.w > 0.99f);
 }
 
 /* Powered flight and coast are the phases where the accelerometer is not
@@ -65,7 +63,7 @@ static void test_inhibited_corrections_leave_the_estimate_to_the_gyro(void)
 
     attitude_input_t in = level_input();
     for (int i = 0; i < 8; i++) attitude_update(&est, &in);
-    assert(est.q_valid);
+    CHECK(est.q_valid);
 
     float before[3];
     attitude_euler(&est, before);
@@ -80,8 +78,8 @@ static void test_inhibited_corrections_leave_the_estimate_to_the_gyro(void)
 
     float after[3];
     attitude_euler(&est, after);
-    assert(fabsf(after[0] - before[0]) < 0.01f);
-    assert(fabsf(after[1] - before[1]) < 0.01f);
+    CHECK_NEAR(after[0], before[0], 0.01f);
+    CHECK_NEAR(after[1], before[1], 0.01f);
 }
 
 static void test_gyro_integration_90deg(void)
@@ -101,8 +99,8 @@ static void test_gyro_integration_90deg(void)
 
     float euler[3];
     attitude_euler(&est, euler);
-    assert(fabsf(euler[2] - PI_F / 2.0f) < 0.35f);
-    assert(fabsf(est.ang_vel[2] - PI_F / 2.0f) < 1e-4f);
+    CHECK_NEAR(euler[2], PI_F / 2.0f, 1e-3f);
+    CHECK_NEAR(est.ang_vel[2], PI_F / 2.0f, 1e-4f);
 }
 
 static void test_nan_inputs_do_not_poison(void)
@@ -120,7 +118,7 @@ static void test_nan_inputs_do_not_poison(void)
     in.accel_mps2[1] = NAN;
     for (int i = 0; i < 100; i++) attitude_update(&est, &in);
 
-    assert(isfinite(est.q.w) && isfinite(est.pos[2]) && isfinite(est.vel[2]));
+    CHECK(isfinite(est.q.w) && isfinite(est.pos[2]) && isfinite(est.vel[2]));
 }
 
 static void test_reset_clears_kinematics(void)
@@ -137,11 +135,11 @@ static void test_reset_clears_kinematics(void)
     for (int i = 0; i < 200; i++) attitude_update(&est, &in);
 
     est.vel[2] = 5.0f;                    /* fake accumulated drift */
-    assert(est.q_valid);
+    CHECK(est.q_valid);
     attitude_reset(&est);
-    assert(est.vel[2] == 0.0f);
-    assert(fabsf(est.pos[2] - 120.0f) < 1.0f);   /* reseeded from baro */
-    assert(est.q_valid);                  /* soft reset preserves attitude */
+    CHECK(est.vel[2] == 0.0f);
+    CHECK_NEAR(est.pos[2], 120.0f, 1.0f);   /* reseeded from baro */
+    CHECK(est.q_valid);                  /* soft reset preserves attitude */
 }
 
 static void test_imu_dropout_drops_q_valid(void)
@@ -154,19 +152,19 @@ static void test_imu_dropout_drops_q_valid(void)
 
     attitude_input_t in = level_input();
     for (int i = 0; i < 10; i++) attitude_update(&est, &in);
-    assert(est.q_valid);
+    CHECK(est.q_valid);
 
     /* Short dropout: state held, attitude still trusted. */
     in.imu_valid = false;
     quat_t q_before = est.q;
     for (int i = 0; i < 10; i++) attitude_update(&est, &in);
-    assert(est.q_valid);
-    assert(est.q.w == q_before.w && est.q.x == q_before.x);
+    CHECK(est.q_valid);
+    CHECK(est.q.w == q_before.w && est.q.x == q_before.x);
 
     /* Past imu_max_stale_s the attitude is declared lost. */
     int limit_ticks = (int)(cfg.imu_max_stale_s / cfg.dt_s);
     for (int i = 0; i < limit_ticks; i++) attitude_update(&est, &in);
-    assert(!est.q_valid);
+    CHECK(!est.q_valid);
 }
 
 /* An IMU stall long enough to invalidate the attitude must not be permanent in
@@ -186,7 +184,7 @@ static void test_imu_stall_in_flight_recovers_validity(void)
 
     attitude_input_t in = level_input();
     for (int i = 0; i < 10; i++) attitude_update(&est, &in);
-    assert(est.q_valid);
+    CHECK(est.q_valid);
     quat_t before = est.q;
 
     /* Coast: corrections inhibited, then the IMU stops answering. */
@@ -194,15 +192,15 @@ static void test_imu_stall_in_flight_recovers_validity(void)
     in.imu_valid = false;
     int limit_ticks = (int)(cfg.imu_max_stale_s / cfg.dt_s) + 10;
     for (int i = 0; i < limit_ticks; i++) attitude_update(&est, &in);
-    assert(!est.q_valid);
+    CHECK(!est.q_valid);
 
     in.imu_valid = true;
     attitude_update(&est, &in);
 
-    assert(est.q_valid);
+    CHECK(est.q_valid);
     /* Resumed from where it was, not rebuilt out of the drag vector. */
-    assert(fabsf(est.q.w - before.w) < 0.01f);
-    assert(fabsf(est.q.z - before.z) < 0.01f);
+    CHECK_NEAR(est.q.w, before.w, 0.01f);
+    CHECK_NEAR(est.q.z, before.z, 0.01f);
 }
 
 /* ---- truth model: propagate an attitude and hand back the sensors it implies ---- */
@@ -239,8 +237,8 @@ static void seed_level(attitude_t *est, attitude_input_t *in, attitude_config_t 
     in->collecting_calib = true;
     for (int i = 0; i < cfg->n_calib + 4; i++) attitude_update(est, in);
     in->collecting_calib = false;
-    assert(est->q_valid);
-    assert(est->calib.done);
+    CHECK(est->q_valid);
+    CHECK(est->calib.done);
 }
 
 static attitude_config_t bench_config(void)
@@ -287,13 +285,13 @@ static float rotation_error_deg(const float w_body[3], float secs, bool mag_on,
 static void test_tilt_about_x_tracks_truth(void)
 {
     float w[3] = {30.0f / RAD2DEG, 0.0f, 0.0f};
-    assert(rotation_error_deg(w, 1.0f, false, 0.0f) < 2.0f);
+    CHECK(rotation_error_deg(w, 1.0f, false, 0.0f) < 2.0f);
 }
 
 static void test_tilt_about_y_tracks_truth(void)
 {
     float w[3] = {0.0f, 30.0f / RAD2DEG, 0.0f};
-    assert(rotation_error_deg(w, 1.0f, false, 0.0f) < 2.0f);
+    CHECK(rotation_error_deg(w, 1.0f, false, 0.0f) < 2.0f);
 }
 
 /* Rates on all three axes at once. A remap that levels correctly but is not a
@@ -302,7 +300,7 @@ static void test_tilt_about_y_tracks_truth(void)
 static void test_combined_rotation_tracks_truth(void)
 {
     float w[3] = {25.0f / RAD2DEG, -18.0f / RAD2DEG, 40.0f / RAD2DEG};
-    assert(rotation_error_deg(w, 1.5f, false, 0.0f) < 3.0f);
+    CHECK(rotation_error_deg(w, 1.5f, false, 0.0f) < 3.0f);
 }
 
 /* The airframe really turns while the reported rate carries a bias, so the mag
@@ -310,7 +308,7 @@ static void test_combined_rotation_tracks_truth(void)
 static void test_mag_does_not_fight_real_rotation(void)
 {
     float w[3] = {0.0f, 0.0f, 20.0f / RAD2DEG};
-    assert(rotation_error_deg(w, 6.0f, true, 0.5f / RAD2DEG) < 3.0f);
+    CHECK(rotation_error_deg(w, 6.0f, true, 0.5f / RAD2DEG) < 3.0f);
 }
 
 static void test_mag_bounds_heading_drift(void)
@@ -338,8 +336,8 @@ static void test_mag_bounds_heading_drift(void)
         drift[mag_on] = fabsf(quat_twist_angle(est.q, axis)) * RAD2DEG;
     }
 
-    assert(drift[1] < 5.0f);
-    assert(drift[1] < drift[0]);
+    CHECK(drift[1] < 5.0f);
+    CHECK(drift[1] < drift[0]);
 }
 
 /* Corrections inhibited, as in flight: the gyro alone carries the attitude and
@@ -366,7 +364,7 @@ static void test_coning_does_not_leak_into_roll(void)
     const float axis[3] = {0.0f, 0.0f, 1.0f};
     float twist_est   = quat_twist_angle(est.q, axis) * RAD2DEG;
     float twist_truth = quat_twist_angle(truth, axis) * RAD2DEG;
-    assert(fabsf(twist_est - twist_truth) < 2.0f);
+    CHECK_NEAR(twist_est, twist_truth, 2.0f);
 }
 
 /* Tilt of the body nose axis from world up, degrees. */
@@ -378,10 +376,7 @@ static float nose_tilt_deg(const attitude_t *est)
     return acosf(clampf(w[2], -1.0f, 1.0f)) * RAD2DEG;
 }
 
-/* A gyro bias of the size measured on the Meteor board (~0.09 deg/s per axis)
- * integrates straight into the vertical reference once corrections are off.
- * The pad, with the aggregator's 24 s standby resets, must leave the flight
- * with that bias removed. */
+/* Meteor-board gyro bias (~0.09 deg/s/axis) learned through 24 s standby resets is gone in gyro-only flight. */
 static void test_pad_gyro_bias_is_removed_before_flight(void)
 {
     attitude_config_t cfg = attitude_config_default();
@@ -398,7 +393,7 @@ static void test_pad_gyro_bias_is_removed_before_flight(void)
         attitude_update(&est, &in);
         if (k % (24 * EST_HZ) == 0) attitude_reset(&est);
     }
-    assert(est.q_valid);
+    CHECK(est.q_valid);
     float tilt_launch = nose_tilt_deg(&est);
 
     in.zupt_active           = false;
@@ -407,9 +402,9 @@ static void test_pad_gyro_bias_is_removed_before_flight(void)
 
     float drift = fabsf(nose_tilt_deg(&est) - tilt_launch);
     printf("  pad bias 0.09 deg/s -> 20 s gyro-only tilt drift %.3f deg\n", drift);
-    assert(drift < 0.1f);
+    CHECK(drift < 0.1f);
     for (int i = 0; i < 3; i++)
-        assert(fabsf(est.ang_vel[i]) < 1e-4f);
+        CHECK_NEAR(est.ang_vel[i], 0.0f, 1e-4f);
 }
 
 /* A bump on the rail is motion, not bias: the pad estimate must not absorb it. */
@@ -430,7 +425,7 @@ static void test_pad_bump_does_not_corrupt_gyro_bias(void)
     in.gyro_rads[0] = -0.0015f;
     for (int k = 0; k < 10 * EST_HZ; k++) attitude_update(&est, &in);
 
-    assert(fabsf(est.gyro_bias[0] - (-0.0015f)) < 1e-4f);
+    CHECK_NEAR(est.gyro_bias[0], (-0.0015f), 1e-4f);
 }
 
 int main(void)
@@ -450,6 +445,5 @@ int main(void)
     test_nan_inputs_do_not_poison();
     test_reset_clears_kinematics();
     test_imu_dropout_drops_q_valid();
-    printf("attitude: OK\n");
-    return 0;
+    return test_report("attitude");
 }

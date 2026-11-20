@@ -7,8 +7,6 @@
 
 #define Ki_acc          0.00002f
 #define BARO_VEL_ALPHA  0.02f
-#define ACCEL_TRUST_MIN (0.7f * GRAVITY)
-#define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
 attitude_config_t attitude_config_default(void)
 {
@@ -86,11 +84,6 @@ void attitude_reset(attitude_t *est)
     if (est->last_good_baro_alt_valid)
         est->pos[2] = est->last_good_baro_alt;
 
-    for (int i = 0; i < 3; i++) {
-        est->last_good_vel[i] = 0.0f;
-        est->last_good_pos[i] = est->pos[i];
-    }
-
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < ATTITUDE_N_AVG; j++)
             est->buf[i][j] = 0.0f;
@@ -138,11 +131,6 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     est->imu_stale_ticks = 0;
 
     const float alpha = est->baro_alpha;
-
-    for (int i = 0; i < 3; i++) {
-        if (!isfinite(est->vel[i])) est->vel[i] = est->last_good_vel[i];
-        if (!isfinite(est->pos[i])) est->pos[i] = est->last_good_pos[i];
-    }
 
     float raw_ax = isfinite(in->accel_mps2[0]) ? in->accel_mps2[0] : est->last_good_acc_original[0];
     float raw_ay = isfinite(in->accel_mps2[1]) ? in->accel_mps2[1] : est->last_good_acc_original[1];
@@ -238,10 +226,8 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
         accel_world[i] -= est->acc_bias_w[i];
 
     const float MAX_ACCEL = 200.0f * 9.81f;
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 3; i++)
         est->acc[i] = clampf(accel_world[i], -MAX_ACCEL, MAX_ACCEL);
-        est->last_good_acc[i] = est->acc[i];
-    }
 
     if (in->zupt_active && est->q_valid && accel_trustworthy) {
         for (int i = 0; i < 3; i++)
@@ -251,42 +237,32 @@ void attitude_update(attitude_t *est, const attitude_input_t *in)
     }
 
     if (!est->baro_inited && in->baro_valid) {
-        est->pos[2]           = baro_alt;
-        est->last_good_pos[2] = baro_alt;
-        est->prev_baro_alt    = baro_alt;
-        est->baro_inited      = true;
+        est->pos[2]      = baro_alt;
+        est->baro_inited = true;
     }
 
-    for (int i = 0; i < 3; i++) {
-        est->vel[i]          += est->acc[i] * dt;
-        est->last_good_vel[i] = est->vel[i];
-    }
+    for (int i = 0; i < 3; i++)
+        est->vel[i] += est->acc[i] * dt;
 
     if (in->zupt_active) {
         est->vel[0] = 0.0f;
         est->vel[1] = 0.0f;
         est->pos[0] = 0.0f;
         est->pos[1] = 0.0f;
-        est->last_good_vel[0] = est->last_good_vel[1] = 0.0f;
-        est->last_good_pos[0] = est->last_good_pos[1] = 0.0f;
     }
 
     if (est->baro_inited && in->baro_vel_valid && isfinite(in->baro_vel_z)) {
         est->vel[2] = (1.0f - BARO_VEL_ALPHA) * est->vel[2]
                     + BARO_VEL_ALPHA          * in->baro_vel_z;
-        est->last_good_vel[2] = est->vel[2];
     }
 
     est->pos[0] += est->vel[0] * dt;
     est->pos[1] += est->vel[1] * dt;
-    est->last_good_pos[0] = est->pos[0];
-    est->last_good_pos[1] = est->pos[1];
 
     float imu_pos_z = est->pos[2] + est->vel[2] * dt;
     est->pos[2] = (est->baro_inited && in->baro_valid)
                 ? alpha * imu_pos_z + (1.0f - alpha) * baro_alt
                 : imu_pos_z;
-    est->last_good_pos[2] = est->pos[2];
 
     est->ang_vel[0] = gx; est->ang_vel[1] = gy; est->ang_vel[2] = gz;
     est->prev_gyro[0] = gx; est->prev_gyro[1] = gy; est->prev_gyro[2] = gz;

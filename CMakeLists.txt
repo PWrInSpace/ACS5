@@ -13,6 +13,14 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 
 
+option(ACS5_HOST_TESTS "Configure the host-side unit tests instead of the firmware" OFF)
+if(ACS5_HOST_TESTS)
+    project(ACS5_host_tests C)
+    enable_testing()
+    add_subdirectory(test/host)
+    return()
+endif()
+
 # Define the build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
@@ -45,8 +53,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add sources to executable
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+# Project-owned sources; CubeMX-generated files come in via cmake/stm32cubemx.
+set(ACS5_SOURCES
     Core/Src/control/arming.c
     Core/Src/control/flight_sm.c
     Core/Src/control/quat.c
@@ -72,6 +80,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/utils/timestamp.c
     Core/Src/buzzer/buzzer.c
 )
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${ACS5_SOURCES})
+set_source_files_properties(${ACS5_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wextra;-Werror")
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE

@@ -49,26 +49,6 @@ void Buzzer_On(void);
 void Buzzer_Off(void);
 
 /**
- * @brief  Set the buzzer output frequency.
- * @param  freq_hz  Desired frequency in Hz (recommended: 1000-4000).
- */
-void Buzzer_SetFreq(uint32_t freq_hz);
-
-/**
- * @brief  Blocking single-note beep. Uses HAL_Delay - do NOT call from ISR.
- *         From a FreeRTOS task use osDelay manually instead.
- * @param  freq_hz      Frequency in Hz.
- * @param  duration_ms  Duration in milliseconds.
- */
-void Buzzer_Beep(uint32_t freq_hz, uint32_t duration_ms);
-
-/**
- * @brief  Non-blocking beep start for FreeRTOS tasks.
- *         Sets frequency and turns on; caller must osDelay then Buzzer_Off().
- */
-void Buzzer_BeepAsync(uint32_t freq_hz);
-
-/**
  * @brief  Play a melody from a BuzzerNote_t array, blocking via osDelay.
  *         MUST be called from a FreeRTOS task (uses osDelay internally).
  *         A 10 ms inter-note gap is inserted between notes to articulate them.

@@ -1,7 +1,7 @@
 // Arming gate: when the roll controller is allowed to drive the canards.
 // One-way per flight, so every one of these is a decision that cannot be undone
 // in the air.
-#include <assert.h>
+#include "test_assert.h"
 #include <stdio.h>
 
 #include "control/arming.h"
@@ -39,9 +39,9 @@ static void test_never_arms_before_free_flight(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(!run(&a, FLIGHT_STATE_STANDBY, 5000.0f, true, CTRL_LOOP_TICKS));
-    assert(!run(&a, FLIGHT_STATE_ACCELERATION, 5000.0f, true, CTRL_LOOP_TICKS));
-    assert(a.state == CTRL_ARM_PREARM);
+    CHECK(!run(&a, FLIGHT_STATE_STANDBY, 5000.0f, true, CTRL_LOOP_TICKS));
+    CHECK(!run(&a, FLIGHT_STATE_ACCELERATION, 5000.0f, true, CTRL_LOOP_TICKS));
+    CHECK(a.state == CTRL_ARM_PREARM);
 }
 
 /* The canard lock is a plain RC servo with no slew limit and about 200 ms of
@@ -53,10 +53,10 @@ static void test_waits_for_the_canard_lock_to_clear(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true,
+    CHECK(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true,
                 (int)cfg.lock_travel_ticks - 1));
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, 2));
-    assert(a.state == CTRL_ARM_ARMED);
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, 2));
+    CHECK(a.state == CTRL_ARM_ARMED);
 }
 
 /* Without the ground reference the altitude is height above the standard
@@ -67,8 +67,8 @@ static void test_requires_a_baro_datum(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, false, CTRL_LOOP_TICKS));
-    assert(a.state == CTRL_ARM_PREARM);
+    CHECK(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, false, CTRL_LOOP_TICKS));
+    CHECK(a.state == CTRL_ARM_PREARM);
 }
 
 static void test_respects_the_altitude_floor(void)
@@ -77,8 +77,8 @@ static void test_respects_the_altitude_floor(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 50.0f, true, CTRL_LOOP_TICKS));
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, 1));
+    CHECK(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 50.0f, true, CTRL_LOOP_TICKS));
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, 1));
 }
 
 /* The floor is a ground interlock, so it is checked once on the way in. Once
@@ -91,10 +91,10 @@ static void test_altitude_noise_after_arming_does_not_disarm(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, CTRL_LOOP_TICKS));
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 20.0f, true, 1));
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, 1));
-    assert(a.state == CTRL_ARM_ARMED);
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, CTRL_LOOP_TICKS));
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 20.0f, true, 1));
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 150.0f, true, 1));
+    CHECK(a.state == CTRL_ARM_ARMED);
 }
 
 /* Apogee ends the maneuver, and the state machine already detects it with a
@@ -105,14 +105,14 @@ static void test_disarms_at_apogee_and_never_rearms(void)
     ctrl_arm_t a;
     ctrl_arm_init(&a, &cfg);
 
-    assert(run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, CTRL_LOOP_TICKS));
-    assert(!run(&a, FLIGHT_STATE_FALLING, 200.0f, true, 1));
-    assert(a.state == CTRL_ARM_SPENT);
+    CHECK(run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, CTRL_LOOP_TICKS));
+    CHECK(!run(&a, FLIGHT_STATE_FALLING, 200.0f, true, 1));
+    CHECK(a.state == CTRL_ARM_SPENT);
 
     /* Nothing brings it back, including a state machine that somehow reports
      * free flight again. */
-    assert(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, CTRL_LOOP_TICKS));
-    assert(a.state == CTRL_ARM_SPENT);
+    CHECK(!run(&a, FLIGHT_STATE_FREE_FLIGHT, 200.0f, true, CTRL_LOOP_TICKS));
+    CHECK(a.state == CTRL_ARM_SPENT);
 }
 
 int main(void)
@@ -123,6 +123,5 @@ int main(void)
     test_respects_the_altitude_floor();
     test_altitude_noise_after_arming_does_not_disarm();
     test_disarms_at_apogee_and_never_rearms();
-    printf("arming: OK\n");
-    return 0;
+    return test_report("arming");
 }

@@ -2,7 +2,7 @@
 //   p_dot = K_CANARD * delta - C_DAMP * p
 // Numbers give a fast, well-damped inner loop so the test checks sequencing
 // and convergence, not flight-gain quality (that is the simulator's job).
-#include <assert.h>
+#include "test_assert.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -57,7 +57,7 @@ static void run(roll_ctrl_t *rc, plant_t *pl, int ticks, bool enabled, float *la
             .roll_rate_rads = pl->p, .maneuver_enabled = enabled,
         };
         float d = roll_ctrl_step(rc, &in);
-        assert(fabsf(d) <= rc->cfg.max_deflection_rad + 1e-6f);
+        CHECK_NEAR(d, 0.0f, rc->cfg.max_deflection_rad + 1e-6f);
         plant_step(pl, d);
         if (last_delta) *last_delta = d;
     }
@@ -71,16 +71,16 @@ static void test_full_sequence(void)
     plant_t pl;
     plant_init(&pl, 3.5f);        /* enters free flight spinning 200 deg/s */
 
-    assert(rc.phase == ROLL_CTRL_IDLE);
+    CHECK(rc.phase == ROLL_CTRL_IDLE);
     run(&rc, &pl, CTRL_HZ * 8, true, NULL);   /* 8 s: damp + rotate + settle */
 
-    assert(rc.phase == ROLL_CTRL_HOLD);
-    assert(fabsf(rc.theta_meas - PI_F / 2.0f) < 0.09f);   /* within ~5 deg */
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
+    CHECK_NEAR(rc.theta_meas, PI_F / 2.0f, 0.09f);   /* within ~5 deg */
     /* Weak sanity check that the plant moved at all. This is absolute angle,
      * so it also carries whatever DAMP shed from p0 - theta_meas above is what
      * pins the 90 deg. */
-    assert(fabsf(pl.angle) > 1.0f);
-    assert(fabsf(pl.p) < 0.35f);          /* re-stabilized (< 20 deg/s) */
+    CHECK(fabsf(pl.angle) > 1.0f);
+    CHECK_NEAR(pl.p, 0.0f, 0.35f);          /* re-stabilized (< 20 deg/s) */
 }
 
 static void test_disable_returns_to_idle_neutral(void)
@@ -92,12 +92,12 @@ static void test_disable_returns_to_idle_neutral(void)
     plant_init(&pl, 0.0f);
 
     run(&rc, &pl, CTRL_HZ, true, NULL);
-    assert(rc.phase != ROLL_CTRL_IDLE);
+    CHECK(rc.phase != ROLL_CTRL_IDLE);
 
     float d = 1.0f;
     run(&rc, &pl, 10, false, &d);         /* apogee: gate drops */
-    assert(rc.phase == ROLL_CTRL_IDLE);
-    assert(d == 0.0f);                    /* canards neutral */
+    CHECK(rc.phase == ROLL_CTRL_IDLE);
+    CHECK(d == 0.0f);                    /* canards neutral */
 }
 
 /* rate_sp exists only to be logged - nothing in the loop reads it back - so
@@ -117,18 +117,18 @@ static void test_rate_sp_tracks_the_outer_loop(void)
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         plant_step(&pl, roll_ctrl_step(&rc, &in));
 
-        assert(fabsf(rc.rate_sp) <= cfg.rate_limit_rads + 1e-6f);
+        CHECK_NEAR(rc.rate_sp, 0.0f, cfg.rate_limit_rads + 1e-6f);
         if (rc.phase == ROLL_CTRL_DAMP || rc.phase == ROLL_CTRL_ABORT)
-            assert(rc.rate_sp == 0.0f);
+            CHECK(rc.rate_sp == 0.0f);
         if (rc.phase == ROLL_CTRL_ROTATE && fabsf(rc.rate_sp) > 0.1f)
             seen_rotating = true;
     }
-    assert(rc.phase == ROLL_CTRL_HOLD);
-    assert(seen_rotating);
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(seen_rotating);
 
     float d = 1.0f;
     run(&rc, &pl, 1, false, &d);
-    assert(rc.rate_sp == 0.0f);   /* disarm clears it with the rest of the state */
+    CHECK(rc.rate_sp == 0.0f);   /* disarm clears it with the rest of the state */
 }
 
 static void test_abort_on_invalid_estimate(void)
@@ -145,7 +145,7 @@ static void test_abort_on_invalid_estimate(void)
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         roll_ctrl_step(&rc, &in);
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* The debounce is the whole point of not latching on one sample: a blip
@@ -161,10 +161,10 @@ static void test_transient_fault_does_not_abort(void)
 
     /* At a threshold of 1 there is no debounce and the burst below would be
      * zero ticks long, so the test would pass without exercising anything. */
-    assert(cfg.abort_debounce_ticks > 1u);
+    CHECK(cfg.abort_debounce_ticks > 1u);
 
     run(&rc, &pl, CTRL_HZ * 2, true, NULL);
-    assert(rc.phase != ROLL_CTRL_ABORT);
+    CHECK(rc.phase != ROLL_CTRL_ABORT);
 
     for (int burst = 0; burst < 5; burst++) {
         for (unsigned i = 0; i < cfg.abort_debounce_ticks - 1u; i++) {
@@ -172,16 +172,16 @@ static void test_transient_fault_does_not_abort(void)
                                       .roll_rate_rads = pl.p,
                                       .maneuver_enabled = true };
             plant_step(&pl, roll_ctrl_step(&rc, &bad));
-            assert(rc.phase != ROLL_CTRL_ABORT);
+            CHECK(rc.phase != ROLL_CTRL_ABORT);
         }
         /* One good tick must clear the count, or the bursts would sum. */
         roll_ctrl_input_t good = { .q = pl.q, .q_valid = true,
                                    .roll_rate_rads = pl.p,
                                    .maneuver_enabled = true };
         plant_step(&pl, roll_ctrl_step(&rc, &good));
-        assert(rc.abort_count == 0);
+        CHECK(rc.abort_count == 0);
     }
-    assert(rc.phase != ROLL_CTRL_ABORT);
+    CHECK(rc.phase != ROLL_CTRL_ABORT);
 }
 
 /* A rejected quaternion must never reach the angle state. The debounce leaves
@@ -200,7 +200,7 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
     plant_init(&pl, 0.0f);
 
     run(&rc, &pl, CTRL_HZ, true, NULL);
-    assert(rc.phase == ROLL_CTRL_ROTATE);
+    CHECK(rc.phase == ROLL_CTRL_ROTATE);
 
     const quat_t q_nan = {NAN, 0.0f, 0.0f, 0.0f};
 
@@ -209,8 +209,8 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
     roll_ctrl_input_t bad = { .q = q_nan, .q_valid = true,
                               .roll_rate_rads = pl.p, .maneuver_enabled = true };
     float d = roll_ctrl_step(&rc, &bad);
-    assert(isfinite(d));
-    assert(isfinite(rc.theta_meas));
+    CHECK(isfinite(d));
+    CHECK(isfinite(rc.theta_meas));
     plant_step(&pl, d);
 
     /* One good tick already cleared abort_count, so the maneuver runs on. */
@@ -218,19 +218,19 @@ static void test_transient_bad_quaternion_keeps_output_finite(void)
         roll_ctrl_input_t in = { .q = pl.q, .q_valid = true,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         float dd = roll_ctrl_step(&rc, &in);
-        assert(isfinite(dd));
-        assert(isfinite(rc.theta_meas));
+        CHECK(isfinite(dd));
+        CHECK(isfinite(rc.theta_meas));
         plant_step(&pl, dd);
     }
-    assert(rc.phase != ROLL_CTRL_ABORT);
+    CHECK(rc.phase != ROLL_CTRL_ABORT);
 
     /* Skipping the angle update must not cost the latch when it persists. */
     for (unsigned i = 0; i < cfg.abort_debounce_ticks; i++) {
         roll_ctrl_input_t in = { .q = q_nan, .q_valid = true,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
-        assert(isfinite(roll_ctrl_step(&rc, &in)));
+        CHECK(isfinite(roll_ctrl_step(&rc, &in)));
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* A dead attitude estimate ends the maneuver but must not disarm the
@@ -261,8 +261,8 @@ static void test_abort_damps_on_gyro_when_attitude_is_lost(void)
         plant_step(&coasting, 0.0f);
     }
 
-    assert(rc.phase == ROLL_CTRL_ABORT);
-    assert(fabsf(controlled.p) < 0.5f * fabsf(coasting.p));
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
+    CHECK_NEAR(controlled.p, 0.0f, 0.5f * fabsf(coasting.p));
 }
 
 /* ABORT is pure rate damping, and on a trimmed airframe holding the rate at
@@ -280,16 +280,16 @@ static void test_abort_keeps_the_trim_correction(void)
     pl.bias = 0.3f;   /* needs bias/K_CANARD = 0.006 rad of standing deflection */
 
     run(&rc, &pl, CTRL_HZ * 6, true, NULL);
-    assert(rc.phase == ROLL_CTRL_HOLD);
-    assert(fabsf(rc.rate_integrator) > 0.003f);   /* learned the trim */
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(fabsf(rc.rate_integrator) > 0.003f);   /* learned the trim */
 
     for (unsigned i = 0; i < cfg.abort_debounce_ticks; i++) {
         roll_ctrl_input_t in = { .q = pl.q, .q_valid = false,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         plant_step(&pl, roll_ctrl_step(&rc, &in));
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
-    assert(rc.rate_sp == 0.0f);                   /* no angle command survives */
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.rate_sp == 0.0f);                   /* no angle command survives */
 
     /* Hold the estimate rejected so this measures ABORT and not the phase it
      * recovers into - the damping claim is about ABORT. */
@@ -298,9 +298,9 @@ static void test_abort_keeps_the_trim_correction(void)
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         plant_step(&pl, roll_ctrl_step(&rc, &in));
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
-    assert(fabsf(rc.rate_integrator) > 0.003f);   /* correction still carried */
-    assert(fabsf(pl.p) < 0.05f);   /* still damped against the trim it kept */
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(fabsf(rc.rate_integrator) > 0.003f);   /* correction still carried */
+    CHECK_NEAR(pl.p, 0.0f, 0.05f);   /* still damped against the trim it kept */
 }
 
 /* 0 is the natural way to spell "no debounce", but it makes the threshold
@@ -317,12 +317,12 @@ static void test_zero_debounce_still_aborts(void)
     plant_init(&pl, 0.0f);
 
     run(&rc, &pl, CTRL_HZ, true, NULL);
-    assert(rc.phase != ROLL_CTRL_ABORT);
+    CHECK(rc.phase != ROLL_CTRL_ABORT);
 
     roll_ctrl_input_t bad = { .q = pl.q, .q_valid = false,
                               .roll_rate_rads = pl.p, .maneuver_enabled = true };
     plant_step(&pl, roll_ctrl_step(&rc, &bad));
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* A bad gyro holds the last good sample rather than substituting zero. Zero
@@ -346,13 +346,13 @@ static void test_bad_gyro_holds_last_sample(void)
                                  .maneuver_enabled = true };
         d = roll_ctrl_step(&rc, &in);
     }
-    assert(rc.phase == ROLL_CTRL_DAMP);
+    CHECK(rc.phase == ROLL_CTRL_DAMP);
 
     roll_ctrl_input_t bad = { .q = quat_identity(), .q_valid = true,
                               .roll_rate_rads = NAN, .maneuver_enabled = true };
     float d_bad = roll_ctrl_step(&rc, &bad);
-    assert(isfinite(d_bad));
-    assert(fabsf(d_bad - d) < 1e-6f);
+    CHECK(isfinite(d_bad));
+    CHECK_NEAR(d_bad, d, 1e-6f);
 }
 
 /* The first good tick after a fault presents the whole rate change that
@@ -370,8 +370,8 @@ static void test_bad_gyro_recovery_stays_bounded(void)
     plant_init(&pl, 3.0f);
 
     run(&rc, &pl, 100, true, NULL);
-    assert(rc.phase == ROLL_CTRL_DAMP);
-    assert(pl.p > cfg.settle_rate_rads);   /* stays in DAMP across the window */
+    CHECK(rc.phase == ROLL_CTRL_DAMP);
+    CHECK(pl.p > cfg.settle_rate_rads);   /* stays in DAMP across the window */
 
     /* One tick short of the debounce, so the fault ends without latching and
      * the recovery tick below is reached at all. */
@@ -380,29 +380,29 @@ static void test_bad_gyro_recovery_stays_bounded(void)
                                   .roll_rate_rads = NAN,
                                   .maneuver_enabled = true };
         float d = roll_ctrl_step(&rc, &bad);
-        assert(isfinite(d));
-        assert(fabsf(d) <= cfg.max_deflection_rad + 1e-6f);
-        assert(d < 0.0f);                  /* still opposing a positive roll */
+        CHECK(isfinite(d));
+        CHECK_NEAR(d, 0.0f, cfg.max_deflection_rad + 1e-6f);
+        CHECK(d < 0.0f);                  /* still opposing a positive roll */
         plant_step(&pl, d);
     }
-    assert(rc.phase != ROLL_CTRL_ABORT);
+    CHECK(rc.phase != ROLL_CTRL_ABORT);
 
     for (int i = 0; i < 100; i++) {
         roll_ctrl_input_t in = { .q = pl.q, .q_valid = true,
                                  .roll_rate_rads = pl.p, .maneuver_enabled = true };
         float d = roll_ctrl_step(&rc, &in);
-        assert(isfinite(d));
-        assert(fabsf(d) <= cfg.max_deflection_rad + 1e-6f);
-        assert(d < 0.0f);
+        CHECK(isfinite(d));
+        CHECK_NEAR(d, 0.0f, cfg.max_deflection_rad + 1e-6f);
+        CHECK(d < 0.0f);
         plant_step(&pl, d);
     }
-    assert(rc.phase == ROLL_CTRL_DAMP);
+    CHECK(rc.phase == ROLL_CTRL_DAMP);
     /* Down from 3 rad/s to under 20 deg/s in either direction. The bound is on
      * magnitude because integral action closes the last of the error by
      * crossing zero rather than creeping up to it; what must not happen is the
      * rate growing, or flipping into a spin the other way, which is what a sign
      * error or a runaway would look like here. */
-    assert(fabsf(pl.p) < 0.35f);
+    CHECK_NEAR(pl.p, 0.0f, 0.35f);
 }
 
 static void test_abort_on_excess_rate(void)
@@ -418,10 +418,10 @@ static void test_abort_on_excess_rate(void)
                              .maneuver_enabled = true };
     for (unsigned i = 0; i < cfg.abort_debounce_ticks - 1u; i++) {
         roll_ctrl_step(&rc, &in);
-        assert(rc.phase != ROLL_CTRL_ABORT);
+        CHECK(rc.phase != ROLL_CTRL_ABORT);
     }
     roll_ctrl_step(&rc, &in);
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* A vehicle that cannot rotate at all is the worst case the old watchdog was
@@ -440,7 +440,7 @@ static void test_no_authority_still_reaches_hold(void)
     plant_init(&pl, 0.0f);
 
     run(&rc, &pl, CTRL_HZ * 3, true, NULL);
-    assert(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
 }
 
 /* Regression pin on DAMP with the shipped defaults.
@@ -495,12 +495,12 @@ static void test_damp_regression_pin(void)
         if (next < sizeof expect / sizeof expect[0] && expect[next].tick == k) {
             /* Loose enough to absorb libm sinf differing by an ulp or two
              * across versions, tight enough that any real retune shows. */
-            assert(fabsf(d - expect[next].delta) < 1e-5f);
+            CHECK_NEAR(d, expect[next].delta, 1e-5f);
             next++;
         }
     }
-    assert(next == sizeof expect / sizeof expect[0]);
-    assert(rc.phase == ROLL_CTRL_DAMP);
+    CHECK(next == sizeof expect / sizeof expect[0]);
+    CHECK(rc.phase == ROLL_CTRL_DAMP);
 }
 
 /* A steady aero trim torque leaves a proportional rate loop with a standing
@@ -519,7 +519,7 @@ static void test_constant_disturbance_still_reaches_rotate(void)
 
     run(&rc, &pl, CTRL_HZ * 3, true, NULL);
 
-    assert(rc.phase == ROLL_CTRL_ROTATE || rc.phase == ROLL_CTRL_HOLD);
+    CHECK(rc.phase == ROLL_CTRL_ROTATE || rc.phase == ROLL_CTRL_HOLD);
 }
 
 /* The integrator cancels a standing trim torque. Tracking lag behind the moving
@@ -539,14 +539,14 @@ static void test_integrator_frozen_during_rotate(void)
 
     for (int i = 0; i < CTRL_HZ * 6 && rc.phase != ROLL_CTRL_ROTATE; i++)
         run(&rc, &pl, 1, true, NULL);
-    assert(rc.phase == ROLL_CTRL_ROTATE);
-    assert(fabsf(rc.rate_integrator) > 1e-4f);   /* DAMP learned the trim */
+    CHECK(rc.phase == ROLL_CTRL_ROTATE);
+    CHECK(fabsf(rc.rate_integrator) > 1e-4f);   /* DAMP learned the trim */
 
     float frozen = rc.rate_integrator;
     for (int i = 0; i < CTRL_HZ / 2 && rc.phase == ROLL_CTRL_ROTATE; i++)
         run(&rc, &pl, 1, true, NULL);
 
-    assert(rc.rate_integrator == frozen);
+    CHECK(rc.rate_integrator == frozen);
 }
 
 /* A rotation that ends a few degrees short is a maneuver that nearly worked,
@@ -565,7 +565,7 @@ static void test_rotate_hands_over_to_hold_even_when_short(void)
 
     run(&rc, &pl, CTRL_HZ * 8, true, NULL);
 
-    assert(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
 }
 
 /* Deterministic, so the dither bound below means the same thing on every run
@@ -602,7 +602,7 @@ static void test_command_does_not_chatter_on_gyro_noise(void)
         if (i > 0) travel += fabsf(d - prev);
         prev = d;
     }
-    assert(travel / (float)(n - 1) < 1e-3f);
+    CHECK(travel / (float)(n - 1) < 1e-3f);
 }
 
 /* The slew limit is what keeps a step in the command from being handed to four
@@ -626,11 +626,11 @@ static void test_slew_limit_bounds_command_rate(void)
         roll_ctrl_input_t in = { .q = quat_identity(), .q_valid = true,
                                  .roll_rate_rads = rate, .maneuver_enabled = true };
         float d = roll_ctrl_step(&rc, &in);
-        assert(fabsf(d - prev) <= max_step + 1e-6f);
+        CHECK_NEAR(d, prev, max_step + 1e-6f);
         if (fabsf(fabsf(d - prev) - max_step) < 1e-7f) ever_bound = true;
         prev = d;
     }
-    assert(ever_bound);   /* otherwise the bound above proves nothing */
+    CHECK(ever_bound);   /* otherwise the bound above proves nothing */
 }
 
 /* Rejecting a constant roll moment in HOLD needs no integrator on the angle.
@@ -648,12 +648,12 @@ static void test_hold_rejects_constant_trim(void)
     pl.bias = 0.3f;
 
     run(&rc, &pl, CTRL_HZ * 10, true, NULL);
-    assert(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
 
     /* Within a quarter degree of the 90 deg target, with the bias still on. */
-    assert(fabsf(rc.theta_meas - cfg.target_angle_rad) < 0.0044f);
+    CHECK_NEAR(rc.theta_meas, cfg.target_angle_rad, 0.0044f);
     /* And holding it, not drifting through it. */
-    assert(fabsf(pl.p) < 0.02f);
+    CHECK_NEAR(pl.p, 0.0f, 0.02f);
 }
 
 /* Sensor faults are transient by nature and the coast is over seven seconds
@@ -671,7 +671,7 @@ static void test_data_fault_abort_recovers_against_the_same_reference(void)
 
     for (int i = 0; i < CTRL_HZ * 6 && rc.phase != ROLL_CTRL_ROTATE; i++)
         run(&rc, &pl, 1, true, NULL);
-    assert(rc.phase == ROLL_CTRL_ROTATE);
+    CHECK(rc.phase == ROLL_CTRL_ROTATE);
     quat_t ref = rc.q_ref;
 
     for (unsigned i = 0; i < cfg.abort_debounce_ticks; i++) {
@@ -679,14 +679,14 @@ static void test_data_fault_abort_recovers_against_the_same_reference(void)
                                   .roll_rate_rads = pl.p, .maneuver_enabled = true };
         plant_step(&pl, roll_ctrl_step(&rc, &bad));
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 
     run(&rc, &pl, CTRL_HZ * 6, true, NULL);          /* estimator comes back */
 
-    assert(rc.phase == ROLL_CTRL_HOLD);
-    assert(rc.q_ref.w == ref.w && rc.q_ref.x == ref.x &&
+    CHECK(rc.phase == ROLL_CTRL_HOLD);
+    CHECK(rc.q_ref.w == ref.w && rc.q_ref.x == ref.x &&
            rc.q_ref.y == ref.y && rc.q_ref.z == ref.z);
-    assert(fabsf(rc.theta_meas - cfg.target_angle_rad) < 0.09f);
+    CHECK_NEAR(rc.theta_meas, cfg.target_angle_rad, 0.09f);
 }
 
 /* The rate abort is not a sensor complaint. Past 720 deg/s something is wrong
@@ -708,11 +708,11 @@ static void test_excess_rate_abort_stays_latched(void)
                                    .maneuver_enabled = true };
         roll_ctrl_step(&rc, &fast);
     }
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 
     plant_init(&pl, 0.0f);                 /* perfectly healthy from here on */
     run(&rc, &pl, CTRL_HZ * 6, true, NULL);
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* Damping command after n ticks at a given dynamic pressure, from a fresh
@@ -746,10 +746,10 @@ static void test_gain_scales_inversely_with_dynamic_pressure(void)
     float at_ref     = damp_command_at(cfg.qbar_ref_pa, 2);
     float at_quarter = damp_command_at(cfg.qbar_ref_pa * 0.25f, 2);
 
-    assert(fabsf(at_ref) > 1e-4f);
+    CHECK(fabsf(at_ref) > 1e-4f);
     /* Four times the gain, so four times the command, while both are far from
      * the deflection limit. */
-    assert(fabsf(at_quarter / at_ref - 4.0f) < 0.05f);
+    CHECK_NEAR(at_quarter / at_ref, 4.0f, 0.05f);
 }
 
 /* The ratio diverges as qbar goes to zero. Unclamped, the last second before
@@ -767,8 +767,8 @@ static void test_gain_scale_is_clamped(void)
                              .qbar_pa = cfg.qbar_floor_pa * 1.01f,
                              .maneuver_enabled = true };
     roll_ctrl_step(&rc, &in);
-    assert(rc.gain_scale <= cfg.gain_scale_max + 1e-6f);
-    assert(rc.gain_scale >= cfg.gain_scale_min - 1e-6f);
+    CHECK(rc.gain_scale <= cfg.gain_scale_max + 1e-6f);
+    CHECK(rc.gain_scale >= cfg.gain_scale_min - 1e-6f);
 }
 
 /* Near apogee there is no authority left to chase gyro noise with, so the
@@ -798,16 +798,16 @@ static void test_below_qbar_floor_holds_the_trim_correction(void)
                                  .qbar_pa = cfg.qbar_floor_pa * 0.5f,
                                  .maneuver_enabled = true };
         d = roll_ctrl_step(&rc, &in);
-        assert(fabsf(d - prev) <= cfg.deflection_slew_rads * cfg.dt_s + 1e-6f
+        CHECK(fabsf(d - prev) <= cfg.deflection_slew_rads * cfg.dt_s + 1e-6f
                || i == 0);
         prev = d;
     }
-    assert(rc.below_qbar_floor);
+    CHECK(rc.below_qbar_floor);
     /* Settled on the integrator, which is the only term still contributing. */
-    assert(fabsf(d - rc.rate_integrator) < 1e-4f);
+    CHECK_NEAR(d, rc.rate_integrator, 1e-4f);
     /* And that term is real: the rate error above was one-sided, so DAMP wound
      * it up rather than leaving it at zero. */
-    assert(fabsf(rc.rate_integrator) > 1e-3f);
+    CHECK(fabsf(rc.rate_integrator) > 1e-3f);
 }
 
 /* A caller with no airspeed estimate passes zero, which is the absence of a
@@ -824,9 +824,9 @@ static void test_absent_dynamic_pressure_disables_scheduling(void)
                              .maneuver_enabled = true };
     float d = roll_ctrl_step(&rc, &in);
 
-    assert(!rc.below_qbar_floor);
-    assert(rc.gain_scale == 1.0f);
-    assert(fabsf(d) > 1e-5f);
+    CHECK(!rc.below_qbar_floor);
+    CHECK(rc.gain_scale == 1.0f);
+    CHECK(fabsf(d) > 1e-5f);
 }
 
 /* The integrator answers the same plant the proportional term does, so it has
@@ -852,8 +852,8 @@ static void test_integrator_is_scheduled_with_the_proportional_term(void)
         wound[k] = rc.rate_integrator;
     }
 
-    assert(fabsf(wound[0]) > 1e-5f);
-    assert(fabsf(wound[1] / wound[0] - 4.0f) < 0.05f);
+    CHECK(fabsf(wound[0]) > 1e-5f);
+    CHECK_NEAR(wound[1] / wound[0], 4.0f, 0.05f);
 }
 
 /* A rate excursion violent enough to abort is exactly the one that runs the
@@ -882,11 +882,11 @@ static void test_overspeed_latches_even_when_the_run_ends_invalid(void)
     roll_ctrl_input_t bad = { .q = pl.q, .q_valid = true, .roll_rate_rads = NAN,
                               .maneuver_enabled = true };
     roll_ctrl_step(&rc, &bad);
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 
     plant_init(&pl, 0.0f);
     run(&rc, &pl, CTRL_HZ * 6, true, NULL);
-    assert(rc.phase == ROLL_CTRL_ABORT);
+    CHECK(rc.phase == ROLL_CTRL_ABORT);
 }
 
 /* An estimator that drops out every few ticks must not be able to drive the
@@ -913,7 +913,7 @@ static void test_intermittent_faults_do_not_thrash_the_sequencer(void)
         plant_step(&pl, roll_ctrl_step(&rc, &in));
         if (prev != ROLL_CTRL_ABORT && rc.phase == ROLL_CTRL_ABORT) aborts++;
     }
-    assert(aborts <= 2);
+    CHECK(aborts <= 2);
 }
 
 int main(void)
@@ -947,6 +947,5 @@ int main(void)
     test_abort_on_excess_rate();
     test_no_authority_still_reaches_hold();
     test_damp_regression_pin();
-    printf("roll_ctrl: OK\n");
-    return 0;
+    return test_report("roll_ctrl");
 }

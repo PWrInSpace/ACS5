@@ -76,28 +76,6 @@ void Buzzer_Off(void)
     _running = 0;
 }
 
-void Buzzer_SetFreq(uint32_t freq_hz)
-{
-    if (_htim == NULL) return;
-    _apply_freq(freq_hz);
-}
-
-void Buzzer_Beep(uint32_t freq_hz, uint32_t duration_ms)
-{
-    if (_htim == NULL) return;
-    _apply_freq(freq_hz);
-    Buzzer_On();
-    HAL_Delay(duration_ms);
-    Buzzer_Off();
-}
-
-void Buzzer_BeepAsync(uint32_t freq_hz)
-{
-    if (_htim == NULL) return;
-    _apply_freq(freq_hz);
-    Buzzer_On();
-}
-
 /* -- Melody playback --------------------------------------------------------- */
 
 #define NOTE_GAP_MS   10u   /* silent gap between notes for articulation */

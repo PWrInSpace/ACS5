@@ -3,6 +3,11 @@
 #include <stdbool.h>
 
 #include "control/quat.h"
+#include "utils/mathx.h"
+
+/* Accel magnitude window inside which the accelerometer is trusted as gravity. */
+#define ACCEL_TRUST_MIN (0.7f * GRAVITY)
+#define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
 /* Mahony AHRS attitude backend. Swap for a Kalman (or other) backend later
  * behind the same filter/attitude.h facade. */

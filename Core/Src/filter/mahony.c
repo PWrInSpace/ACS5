@@ -7,8 +7,6 @@
 #define Kp_accel        0.5f
 #define Kp_mag          0.25f
 #define Ki              0.005f
-#define ACCEL_TRUST_MIN (0.7f * GRAVITY)
-#define ACCEL_TRUST_MAX (1.3f * GRAVITY)
 
 void mahony_init(mahony_t *m)
 {

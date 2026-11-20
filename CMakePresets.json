@@ -6,7 +6,7 @@
             "hidden": true,
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build/${presetName}",
-		    "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
+            "toolchainFile": "${sourceDir}/cmake/gcc-arm-none-eabi.cmake",
             "cacheVariables": {
             }
         },
@@ -31,6 +31,15 @@
                 "CMAKE_BUILD_TYPE": "Debug",
                 "ACS5_SERVO_BENCH": "ON"
             }
+        },
+        {
+            "name": "host",
+            "displayName": "Host unit tests (ASan + UBSan)",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/host-tests",
+            "cacheVariables": {
+                "ACS5_HOST_TESTS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -45,6 +54,22 @@
         {
             "name": "Bench",
             "configurePreset": "Bench"
+        },
+        {
+            "name": "host",
+            "configurePreset": "host"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "host",
+            "configurePreset": "host",
+            "output": {
+                "outputOnFailure": true
+            },
+            "execution": {
+                "noTestsAction": "error"
+            }
         }
     ]
 }

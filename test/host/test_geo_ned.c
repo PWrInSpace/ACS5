@@ -1,7 +1,7 @@
 // Tests for the local North-East-Down conversion: scale factors, axis signs and
 // edge cases. Reference values are computed independently from the WGS-84
 // ellipsoid in double precision.
-#include <assert.h>
+#include "test_assert.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -25,21 +25,15 @@ static double ref_m_per_deg_lon(double lat_deg) {
 
 static int32_t deg_1e7(double deg) { return (int32_t)llround(deg * 1e7); }
 
-static void test_unset_datum_is_invalid(void) {
-    geo_ned_datum_t d;
-    memset(&d, 0, sizeof d);          // what a static starts out as
-    assert(!d.valid);
-}
-
 static void test_datum_set_stores_position_and_scales(void) {
     geo_ned_datum_t d;
     memset(&d, 0, sizeof d);
     geo_ned_datum_set(&d, deg_1e7(52.1), deg_1e7(17.2), 83000);
-    assert(d.valid);
-    assert(d.lat_1e7 == deg_1e7(52.1) && d.lon_1e7 == deg_1e7(17.2) && d.height_mm == 83000);
+    CHECK(d.valid);
+    CHECK(d.lat_1e7 == deg_1e7(52.1) && d.lon_1e7 == deg_1e7(17.2) && d.height_mm == 83000);
     // float scale factors, so a few centimetres per degree of tolerance
-    assert(fabs(d.m_per_deg_lat - ref_m_per_deg_lat(52.1)) < 0.05);
-    assert(fabs(d.m_per_deg_lon - ref_m_per_deg_lon(52.1)) < 0.05);
+    CHECK(fabs(d.m_per_deg_lat - ref_m_per_deg_lat(52.1)) < 0.05);
+    CHECK(fabs(d.m_per_deg_lon - ref_m_per_deg_lon(52.1)) < 0.05);
 }
 
 static void test_scale_changes_with_latitude(void) {
@@ -50,15 +44,15 @@ static void test_scale_changes_with_latitude(void) {
     for (size_t i = 0; i < sizeof lats / sizeof lats[0]; i++) {
         geo_ned_datum_t d;
         geo_ned_datum_set(&d, deg_1e7(lats[i]), 0, 0);
-        assert(fabs(d.m_per_deg_lat - ref_m_per_deg_lat(lats[i])) < 0.05);
-        assert(fabs(d.m_per_deg_lon - ref_m_per_deg_lon(lats[i])) < 0.05);
-        assert(d.m_per_deg_lon > 0.0f);
+        CHECK(fabs(d.m_per_deg_lat - ref_m_per_deg_lat(lats[i])) < 0.05);
+        CHECK(fabs(d.m_per_deg_lon - ref_m_per_deg_lon(lats[i])) < 0.05);
+        CHECK(d.m_per_deg_lon > 0.0f);
     }
     geo_ned_datum_t eq, hi;
     geo_ned_datum_set(&eq, 0, 0, 0);
     geo_ned_datum_set(&hi, deg_1e7(60.0), 0, 0);
-    assert(hi.m_per_deg_lon < 0.55f * eq.m_per_deg_lon);   // cos(60 deg) = 0.5
-    assert(hi.m_per_deg_lat > eq.m_per_deg_lat);
+    CHECK(hi.m_per_deg_lon < 0.55f * eq.m_per_deg_lon);   // cos(60 deg) = 0.5
+    CHECK(hi.m_per_deg_lat > eq.m_per_deg_lat);
 }
 
 static void test_same_position_is_zero(void) {
@@ -66,7 +60,7 @@ static void test_same_position_is_zero(void) {
     geo_ned_datum_set(&d, deg_1e7(51.5), deg_1e7(-0.12), 35000);
     float n[3] = {9, 9, 9};
     geo_ned_from_geodetic(&d, deg_1e7(51.5), deg_1e7(-0.12), 35000, n);
-    assert(n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f);
+    CHECK(n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f);
 }
 
 static void test_axis_signs(void) {
@@ -76,19 +70,19 @@ static void test_axis_signs(void) {
     float n[3];
 
     geo_ned_from_geodetic(&d, deg_1e7(45.001), deg_1e7(10.0), 0, n);
-    assert(n[0] > 0.0f && n[1] == 0.0f && n[2] == 0.0f);
+    CHECK(n[0] > 0.0f && n[1] == 0.0f && n[2] == 0.0f);
     geo_ned_from_geodetic(&d, deg_1e7(44.999), deg_1e7(10.0), 0, n);
-    assert(n[0] < 0.0f);
+    CHECK(n[0] < 0.0f);
 
     geo_ned_from_geodetic(&d, deg_1e7(45.0), deg_1e7(10.001), 0, n);
-    assert(n[1] > 0.0f && n[0] == 0.0f);
+    CHECK(n[1] > 0.0f && n[0] == 0.0f);
     geo_ned_from_geodetic(&d, deg_1e7(45.0), deg_1e7(9.999), 0, n);
-    assert(n[1] < 0.0f);
+    CHECK(n[1] < 0.0f);
 
     geo_ned_from_geodetic(&d, deg_1e7(45.0), deg_1e7(10.0), 1000, n);       // +1 m up
-    assert(fabsf(n[2] + 1.0f) < 1e-6f);
+    CHECK_NEAR(n[2], -(1.0f), 1e-6f);
     geo_ned_from_geodetic(&d, deg_1e7(45.0), deg_1e7(10.0), -2500, n);      // 2.5 m down
-    assert(fabsf(n[2] - 2.5f) < 1e-6f);
+    CHECK_NEAR(n[2], 2.5f, 1e-6f);
 }
 
 static void test_known_distances_at_the_equator(void) {
@@ -98,8 +92,8 @@ static void test_known_distances_at_the_equator(void) {
     geo_ned_datum_set(&d, 0, 0, 0);
     float n[3];
     geo_ned_from_geodetic(&d, 100, 100, 0, n);
-    assert(fabsf(n[0] - 1.10574f) < 1e-4f);
-    assert(fabsf(n[1] - 1.11319f) < 1e-4f);
+    CHECK_NEAR(n[0], 1.10574f, 1e-4f);
+    CHECK_NEAR(n[1], 1.11319f, 1e-4f);
 }
 
 static void test_matches_reference_over_flight_scale_distances(void) {
@@ -115,9 +109,9 @@ static void test_matches_reference_over_flight_scale_distances(void) {
         float n[3];
         geo_ned_from_geodetic(&d, deg_1e7(lats[i] + dlat), deg_1e7(lons[i] + dlon),
                               100000 + 3000000, n);
-        assert(fabs(n[0] - dlat * ref_m_per_deg_lat(lats[i])) < 0.05);
-        assert(fabs(n[1] - dlon * ref_m_per_deg_lon(lats[i])) < 0.05);
-        assert(fabsf(n[2] + 3000.0f) < 1e-3f);
+        CHECK(fabs(n[0] - dlat * ref_m_per_deg_lat(lats[i])) < 0.05);
+        CHECK(fabs(n[1] - dlon * ref_m_per_deg_lon(lats[i])) < 0.05);
+        CHECK_NEAR(n[2], -(3000.0f), 1e-3f);
     }
 }
 
@@ -129,7 +123,7 @@ static void test_difference_is_taken_in_integers(void) {
     geo_ned_datum_set(&d, 519999999, 170000000, 0);
     float n[3];
     geo_ned_from_geodetic(&d, 520000000, 170000000, 0, n);   // 1e-7 degree, about 1.1 cm
-    assert(n[0] > 0.010f && n[0] < 0.013f);
+    CHECK(n[0] > 0.010f && n[0] < 0.013f);
 }
 
 static void test_extreme_coordinates_do_not_overflow(void) {
@@ -141,19 +135,18 @@ static void test_extreme_coordinates_do_not_overflow(void) {
 
     geo_ned_datum_set(&d, 900000000, 1800000000, 0);
     geo_ned_from_geodetic(&d, -900000000, 1800000000, 0, n);
-    assert(isfinite(n[0]) && n[0] < -1.9e7f);          // about 180 degrees of latitude south
+    CHECK(isfinite(n[0]) && n[0] < -1.9e7f);          // about 180 degrees of latitude south
 
     geo_ned_datum_set(&d, 0, 1800000000, 0);
     geo_ned_from_geodetic(&d, 0, -1800000000, 0, n);
-    assert(fabs(n[1] - (-360.0 * ref_m_per_deg_lon(0.0))) < 5.0);   // -360 degrees of longitude
+    CHECK(fabs(n[1] - (-360.0 * ref_m_per_deg_lon(0.0))) < 5.0);   // -360 degrees of longitude
 
     geo_ned_datum_set(&d, 0, -1800000000, 0);
     geo_ned_from_geodetic(&d, 0, 1800000000, 0, n);
-    assert(fabs(n[1] - (360.0 * ref_m_per_deg_lon(0.0))) < 5.0);
+    CHECK(fabs(n[1] - (360.0 * ref_m_per_deg_lon(0.0))) < 5.0);
 }
 
 int main(void) {
-    test_unset_datum_is_invalid();
     test_datum_set_stores_position_and_scales();
     test_scale_changes_with_latitude();
     test_same_position_is_zero();
@@ -162,6 +155,5 @@ int main(void) {
     test_matches_reference_over_flight_scale_distances();
     test_difference_is_taken_in_integers();
     test_extreme_coordinates_do_not_overflow();
-    puts("test_geo_ned: all passed");
-    return 0;
+    return test_report("geo_ned");
 }

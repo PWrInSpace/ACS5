@@ -1,5 +1,5 @@
 /*
- * ACS4 Flight Computer - MMC5983MA Magnetometer Driver
+ * MMC5983MA Magnetometer Driver
  *
  * MEMSIC MMC5983MA, 18-bit tri-axis magnetometer over SPI.
  * Continuous-measurement mode; output in uT (sensor frame).

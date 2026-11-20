@@ -79,8 +79,6 @@ typedef struct
     int    buf_idx, buf_count;
     int    imu_stale_ticks;
     float  last_good_acc_original[3];
-    float  last_good_acc[3];
-    float  last_good_vel[3], last_good_pos[3];
     float  last_good_baro_alt;
     bool   last_good_baro_alt_valid;
 
@@ -89,13 +87,12 @@ typedef struct
     /* Learned on the pad (zupt_active), frozen after: in flight the vertical is gyro-only. */
     float  gyro_bias[3];
     uint32_t gyro_bias_n;     /* samples averaged so far, saturating */
-    float  prev_baro_alt;
 } attitude_t;
 
 void attitude_init(attitude_t *est, const attitude_config_t *cfg);
 void attitude_update(attitude_t *est, const attitude_input_t *in);
 
-/* Soft standby reset: clears kinematics / bias / ring; preserves quat + calib. */
+/* Soft standby reset: clears kinematics, accel bias and ring; keeps quat, calib and gyro bias. */
 void attitude_reset(attitude_t *est);
 
 /* ZYX Euler angles [rad] of the current attitude; out[2] is roll about body Z.

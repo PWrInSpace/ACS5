@@ -227,7 +227,7 @@ SECTIONS
   } >DTCMRAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
 
-  /* GNSS UART DMA RX ring — must live in AXI SRAM (DMA1 cannot touch DTCM). */
+  /* DMA-visible buffers (GNSS UART ring, SD FatFs) — AXI SRAM, since DMA1 and SDMMC1 IDMA cannot touch DTCM. */
   .dma_buf (NOLOAD) : ALIGN(32)
   {
     *(.dma_buf)

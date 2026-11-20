@@ -226,14 +226,11 @@ int main(int argc, char **argv)
     }
 
     if (argc == 3 && !strcmp(argv[1], "scenario")) {
-        /* Exit code gates only completed && !aborted - the timing/accuracy
-         * criteria become binding once tuned gains land (mc mode enforces
-         * them). The PASS/FAIL label always reflects full criteria. */
         sim_params_t p = scenario(argv[2]);
         g_rng = 0xAC54C0DEu;
         sim_result_t r = simulate(&p, &cfg, COAST_S, NULL);
         print_result(argv[2], &r);
-        return (r.completed && !r.aborted) ? 0 : 1;
+        return criteria_pass(&r) ? 0 : 1;
     }
 
     if (argc == 4 && !strcmp(argv[1], "mc")) {

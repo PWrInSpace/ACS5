@@ -1,6 +1,6 @@
 // Drives the flight state machine through a synthetic flight profile and
 // checks every transition and the post-apogee logging cutoff.
-#include <assert.h>
+#include "test_assert.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -46,42 +46,42 @@ static void test_full_flight(float dt)
     flight_sm_config_t cfg = flight_sm_config_default();
     flight_sm_t sm;
     flight_sm_init(&sm, &cfg);
-    assert(sm.state == FLIGHT_STATE_STANDBY);
+    CHECK(sm.state == FLIGHT_STATE_STANDBY);
 
     /* Launch: az > 1.5 g must persist launch_debounce ticks. */
     step_n(&sm, cfg.launch_debounce - 1, 20.0f, 0, 0, false, dt);
-    assert(sm.state == FLIGHT_STATE_STANDBY);
+    CHECK(sm.state == FLIGHT_STATE_STANDBY);
     step_n(&sm, 1, 20.0f, 0, 0, false, dt);
-    assert(sm.state == FLIGHT_STATE_ACCELERATION);
+    CHECK(sm.state == FLIGHT_STATE_ACCELERATION);
 
     /* A single low-az tick must not trigger burnout (debounce resets). */
     step_n(&sm, 1, 0.5f, 100, 100, false, dt);
     step_n(&sm, 1, 20.0f, 110, 110, false, dt);
     step_n(&sm, cfg.burnout_debounce - 1, 0.5f, 200, 200, false, dt);
-    assert(sm.state == FLIGHT_STATE_ACCELERATION);
+    CHECK(sm.state == FLIGHT_STATE_ACCELERATION);
     /* The aggregator keys the canard unlock off the transition flag. */
-    assert(step_n(&sm, 1, 0.5f, 200, 200, false, dt));
-    assert(sm.state == FLIGHT_STATE_FREE_FLIGHT);
-    assert(!step_n(&sm, 1, 0.5f, 200, 200, false, dt));
-    assert(sm.peak_alt >= 200.0f - 1e-3f);
+    CHECK(step_n(&sm, 1, 0.5f, 200, 200, false, dt));
+    CHECK(sm.state == FLIGHT_STATE_FREE_FLIGHT);
+    CHECK(!step_n(&sm, 1, 0.5f, 200, 200, false, dt));
+    CHECK(sm.peak_alt >= 200.0f - 1e-3f);
 
     /* Coast up at +33 m/s for 6 s - stays in FREE_FLIGHT. */
     float alt = ramp(&sm, 200.0f, 33.3f, 6.0f, dt);
-    assert(sm.state == FLIGHT_STATE_FREE_FLIGHT);
+    CHECK(sm.state == FLIGHT_STATE_FREE_FLIGHT);
 
     /* Descend: baro velocity < -1 m/s AND >7.5 m below peak -> FALLING. */
     alt = ramp(&sm, alt, -33.3f, 0.7f, dt);
-    assert(sm.state == FLIGHT_STATE_FALLING);
+    CHECK(sm.state == FLIGHT_STATE_FALLING);
 
     /* Chute: baro velocity recovering above -5 m/s for recovery_debounce. */
     ramp(&sm, alt, 0.0f, 4.0f, dt);
-    assert(sm.state == FLIGHT_STATE_RECOVERY);
+    CHECK(sm.state == FLIGHT_STATE_RECOVERY);
 
     /* Mission completes post_falling_timeout_ticks after FALLING entry. */
-    assert(!sm.mission_complete);
+    CHECK(!sm.mission_complete);
     for (uint32_t i = 0; i < cfg.post_falling_timeout_ticks; i++)
         step_n(&sm, 1, 0.0f, 100.0f, 100.0f, false, dt);
-    assert(sm.mission_complete);
+    CHECK(sm.mission_complete);
 }
 
 static void test_launch_debounce_resets(void)
@@ -92,7 +92,7 @@ static void test_launch_debounce_resets(void)
     step_n(&sm, cfg.launch_debounce - 1, 20.0f, 0, 0, false, BARO_DT_SLOW);
     step_n(&sm, 1, 5.0f, 0, 0, false, BARO_DT_SLOW);   /* dip below threshold */
     step_n(&sm, cfg.launch_debounce - 1, 20.0f, 0, 0, false, BARO_DT_SLOW);
-    assert(sm.state == FLIGHT_STATE_STANDBY);          /* counter restarted */
+    CHECK(sm.state == FLIGHT_STATE_STANDBY);          /* counter restarted */
 }
 
 static void test_nan_baro_sample_is_ignored(float dt)
@@ -104,16 +104,16 @@ static void test_nan_baro_sample_is_ignored(float dt)
     /* Boost + burnout to reach FREE_FLIGHT, then coast up as in a real flight. */
     step_n(&sm, cfg.launch_debounce, 20.0f, 0, 0, false, dt);
     step_n(&sm, cfg.burnout_debounce, 0.5f, 200, 200, false, dt);
-    assert(sm.state == FLIGHT_STATE_FREE_FLIGHT);
+    CHECK(sm.state == FLIGHT_STATE_FREE_FLIGHT);
     float alt = ramp(&sm, 200.0f, 33.3f, 6.0f, dt);
 
     /* A NaN sample mid-coast must leave the velocity filter usable. */
     step_n(&sm, 1, 0.0f, alt, nanf(""), true, dt);
-    assert(isfinite(sm.baro_vel_z));
+    CHECK(isfinite(sm.baro_vel_z));
 
     /* Apogee must still be detected afterwards. */
     ramp(&sm, alt, -33.3f, 0.7f, dt);
-    assert(sm.state == FLIGHT_STATE_FALLING);
+    CHECK(sm.state == FLIGHT_STATE_FALLING);
 }
 
 /* The velocity estimate is a difference over a held-open span, so its noise is
@@ -130,13 +130,13 @@ static void test_vel_is_cadence_independent(void)
         flight_sm_init(&sm, &cfg);
         step_n(&sm, cfg.launch_debounce, 20.0f, 0, 0, false, dts[i]);
         step_n(&sm, cfg.burnout_debounce, 0.5f, 200, 200, false, dts[i]);
-        assert(sm.state == FLIGHT_STATE_FREE_FLIGHT);
+        CHECK(sm.state == FLIGHT_STATE_FREE_FLIGHT);
         ramp(&sm, 200.0f, 25.0f, 6.0f, dts[i]);
         vel[i] = sm.baro_vel_z;
     }
 
-    assert(fabsf(vel[0] - 25.0f) < 1.0f);
-    assert(fabsf(vel[1] - 25.0f) < 1.0f);
+    CHECK_NEAR(vel[0], 25.0f, 1.0f);
+    CHECK_NEAR(vel[1], 25.0f, 1.0f);
 }
 
 int main(void)
@@ -147,6 +147,5 @@ int main(void)
     test_nan_baro_sample_is_ignored(BARO_DT_SLOW);
     test_nan_baro_sample_is_ignored(BARO_DT_FAST);
     test_vel_is_cadence_independent();
-    printf("flight_sm: OK\n");
-    return 0;
+    return test_report("flight_sm");
 }

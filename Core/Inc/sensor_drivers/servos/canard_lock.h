@@ -13,5 +13,4 @@
 /* Starts the PWM channel with no pulse; the servo stays limp until set_us(). */
 WARN_UNUSED bool canard_lock_init(TIM_HandleTypeDef *htim);
 
-void     canard_lock_set_us(uint16_t pulse_us);
-uint16_t canard_lock_current_us(void);
+void canard_lock_set_us(uint16_t pulse_us);

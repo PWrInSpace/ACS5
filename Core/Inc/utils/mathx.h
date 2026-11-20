@@ -5,6 +5,7 @@
 
 #define GRAVITY 9.796f     /* local g used by the Mahony-tuned filter, m/s^2 */
 #define RAD2DEG 57.2957795f
+#define DEG2RAD 0.0174532925f
 #define PI_F    3.14159265358979f
 
 static inline float clampf(float v, float lo, float hi)

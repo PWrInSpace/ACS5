@@ -1,5 +1,5 @@
 /*
- * ACS4 Flight Computer - MS5611 Barometric Pressure Sensor Driver
+ * MS5611 Barometric Pressure Sensor Driver
  *
  * MEAS Switzerland MS5611-01BA03, 24-bit delta-sigma ADC barometer.
  * Communicates over SPI (Mode 0 or 3, max 20 MHz).

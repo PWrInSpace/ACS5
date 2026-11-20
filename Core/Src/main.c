@@ -28,6 +28,7 @@
 #include "aggregator.h"
 #include "control/flight_sm.h"
 #include "utils/mathx.h"
+#include "utils/attributes.h"
 #include "task.h"
 /* USER CODE END Includes */
 
@@ -64,16 +65,11 @@ void MX_FREERTOS_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-/*
- * AXI SRAM layout (0x24000000, 64 KB MPU region):
- *   0x24000000  FATFS  (~560 B)
- *   0x24000400  FIL    (~580 B)
- *
- * These must stay in the MPU-protected, non-cacheable AXI SRAM region
- * so SDMMC DMA sees coherent data.
- */
-static FATFS *const pSDFatFS = (FATFS *)0x24000000;
-static FIL   *const pLogFile = (FIL *)  0x24000400;
+/* SDMMC1 IDMA cannot reach DTCM, so the FatFs sector windows live in AXI SRAM. */
+static FATFS s_sd_fatfs ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
+static FIL   s_log_file ATTR_SECTION(".dma_buf") ATTR_ALIGNED(32);
+static FATFS *const pSDFatFS = &s_sd_fatfs;
+static FIL   *const pLogFile = &s_log_file;
 
 int _write(int file, char *ptr, int len) {
     (void)file;
@@ -380,7 +376,7 @@ void StartSDTask(void *argument)
 
         f_write(pLogFile, line, len, &bw);
 
-        /* Sync every 50 rows - ~500 ms at 10 ms/row.
+        /* Sync every 50 rows - ~400 ms at 8 ms/row.
          * Protects against data loss if power is cut during descent.    */
         if (snap.flight_state == FLIGHT_STATE_STANDBY || ++sync_counter >= 50)
         {

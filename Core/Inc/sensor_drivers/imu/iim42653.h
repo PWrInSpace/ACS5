@@ -1,5 +1,5 @@
 /*
- * ACS4 Flight Computer - IIM-42653 IMU Driver
+ * IIM-42653 IMU Driver
  *
  * TDK InvenSense IIM-42653 6-axis IMU (3-axis accel + 3-axis gyro).
  * Communicates over SPI (Mode 0 or 3, max 24 MHz).
@@ -319,8 +319,8 @@ typedef struct
 
 /*
  * Default rocket-flight configuration (register-read mode):
- *   - Gyro:  +/-2000 dps @ 1 kHz, 2nd-order filter BW = ODR/4
- *   - Accel: +/-32 g    @ 1 kHz, 2nd-order filter BW = ODR/4
+ *   - Gyro:  +/-2000 dps @ 1 kHz, 2nd-order filter BW = ODR/8
+ *   - Accel: +/-32 g    @ 1 kHz, 2nd-order filter BW = ODR/8
  *   - AAF:   ~536 Hz on both (rejects motor vibration aliasing)
  *   - Notch: enabled at MEMS resonance (~2.5 kHz), BW = 329 Hz
  *   - Temp filter: 40 Hz (low noise for slow-varying temperature)

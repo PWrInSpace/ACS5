@@ -71,13 +71,14 @@ bool servo_bank_t75_init(servo_bank_t75_t *self, TIM_HandleTypeDef *htim,
 
     /* TIM3 must already be configured by CubeMX MX_TIM3_Init().
      * We just start the PWM channels here - pins stay at 0 until arm(). */
+    bool ok = true;
     for (uint8_t i = 0; i < SERVO_T75_FIN_COUNT; ++i)
     {
-        HAL_TIM_PWM_Start(self->htim, kFinToHalChannel[i]);
+        ok &= HAL_TIM_PWM_Start(self->htim, kFinToHalChannel[i]) == HAL_OK;
         set_pwm_pulse(self->htim, kFinToHalChannel[i], 0U);  /* no pulse until armed */
     }
 
-    return true;
+    return ok;
 }
 
 void servo_bank_t75_arm(servo_bank_t75_t *self)
