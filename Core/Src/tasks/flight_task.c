@@ -17,6 +17,7 @@
 #include "tasks/gnss_task.h"
 #include "tasks/sd_log_task.h"
 #include "utils/mathx.h"
+#include "utils/fault_record.h"
 #include "utils/timestamp.h"
 #include "spi.h"
 #include "main.h"
@@ -150,6 +151,19 @@ static bool imu_bring_up(const iim42653_config_t *cfg)
            iim42653_configure(&g_imu, cfg);
 }
 
+/* Print the fault that reset the previous run, if any. */
+static void report_previous_fault(void)
+{
+    fault_record_t f;
+    if (!fault_record_take(&f))
+        return;
+    USB_PRINTF("[FAULT] previous run: kind=%lu pc=0x%08lx lr=0x%08lx cfsr=0x%08lx hfsr=0x%08lx "
+               "bfar=0x%08lx mmfar=0x%08lx at %s:%lu\r\n",
+               (unsigned long)f.kind, (unsigned long)f.pc, (unsigned long)f.lr,
+               (unsigned long)f.cfsr, (unsigned long)f.hfsr, (unsigned long)f.bfar,
+               (unsigned long)f.mmfar, f.file ? f.file : "-", (unsigned long)f.line);
+}
+
 /* IMU is mandatory and halts on failure; baro and mag only report. */
 static void sensors_init(void)
 {
@@ -234,6 +248,7 @@ void StartFlightTask(void *argument)
     vTaskDelay(pdMS_TO_TICKS(3000));
 
     USB_PRINTF("--- ACS5 Flight Task Starting ---\r\n");
+    report_previous_fault();
 
     sensors_init();
     actuators_init();

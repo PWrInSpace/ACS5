@@ -234,6 +234,13 @@ SECTIONS
     *(.dma_buf*)
   } >RAM_D1
 
+  /* Not zeroed at startup, so contents survive a system reset (fault record). */
+  .noinit (NOLOAD) : ALIGN(4)
+  {
+    *(.noinit)
+    *(.noinit*)
+  } >RAM_D1
+
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 

@@ -20,6 +20,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "utils/fault_record.h"
 #include "sdmmc.h"
 #include "usb_print.h"
 /* USER CODE END Includes */
@@ -269,9 +270,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  while (1)
-  {
-  }
+  fault_record_error_handler((uint32_t)__builtin_return_address(0));
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT

@@ -22,6 +22,7 @@
 #include "stm32h7xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "utils/fault_record.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -89,6 +90,13 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
+  /* Hand the stacked frame (PSP for task code, MSP for handlers) to the recorder.
+   * The MSP case is exact only where the compiler emits no prologue here (-O2). */
+  __asm volatile("tst lr, #4      \n"
+                 "ite eq          \n"
+                 "mrseq r0, msp   \n"
+                 "mrsne r0, psp   \n"
+                 "b fault_record_hardfault \n");
 
   /* USER CODE END HardFault_IRQn 0 */
   while (1)

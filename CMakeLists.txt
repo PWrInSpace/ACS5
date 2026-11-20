@@ -83,6 +83,7 @@ set(ACS5_SOURCES
     Core/Src/utils/axes_remap.c
     Core/Src/utils/geo_ned.c
     Core/Src/utils/timestamp.c
+    Core/Src/utils/fault_record.c
     Core/Src/buzzer/buzzer.c
 )
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${ACS5_SOURCES})
