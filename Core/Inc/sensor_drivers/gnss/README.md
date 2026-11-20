@@ -7,10 +7,9 @@ u-blox MAX-M10S over UART, UBX binary protocol.
 | File | Layer | Depends on | Tested by |
 |---|---|---|---|
 | `sensor_drivers/gnss/ubx_parse.{h,c}` | UBX codec | libc | `test/host/test_ubx_parse.c` |
-| `sensor_drivers/gnss/max_m10s.{h,c}` | hardware: UART, DMA, module setup | STM32 HAL, `ubx_parse` | bench *(see "Still open")* |
-| `tasks/gnss_task.{h,c}` | FreeRTOS task, the published fix | CMSIS-RTOS2, `max_m10s`, `geo_ned` | bench *(see "Still open")* |
+| `sensor_drivers/gnss/max_m10s.{h,c}` | hardware: UART, DMA, module setup | STM32 HAL, `ubx_parse` | bench only |
+| `tasks/gnss_task.{h,c}` | FreeRTOS task, `gnss_fix_t` (the published fix) | CMSIS-RTOS2, `max_m10s`, `geo_ned` | bench only |
 | `utils/geo_ned.{h,c}` | position relative to the pad (NED) | libm | `test/host/test_geo_ned.c` |
-| `flight/flight_data.h` | `gnss_fix_t`, the snapshot other code reads | `max_m10s.h`, `ubx_parse.h` types | — |
 
 Everything that can be wrong about the wire format or the maths is reachable from
 a host test; the hardware layer keeps DMA, timing and retries, and the task layer
@@ -51,16 +50,16 @@ keeps the RTOS objects and the published data.
 
 ### Link set-up and the module's baud rate
 
-The module's configuration lives in its RAM, so after a reset of the MCU alone it
-is still at 115200, while after a power cycle it is at 38400.
+The configuration is written to RAM and battery-backed RAM. After an MCU-only
+reset, or a power cycle with the backup cell fitted, the module is still at
+115200; without the cell it boots at 9600 (MAX-M10S, integration manual 2.1.4).
 `max_m10s_configure()` therefore:
 
 1. tries 115200 first (`CFG-UART1-BAUDRATE` = 115200, one attempt); an ACK means
    the module was already there;
-2. otherwise switches the STM32 to 38400 and sends the same command (its ACK is not
-   relied on — the module may switch before or answer at the new speed);
-3. switches the STM32 to 115200 and requires an ACK there, which is the real proof
-   that the link works.
+2. otherwise, for 9600 and then 38400: switches the STM32 to that speed and sends
+   the same command (its ACK is not relied on), waits 100 ms for the module to
+   switch, then switches the STM32 to 115200 and requires an ACK there.
 
 Every switch of the STM32 UART aborts the running receive first, re-initialises the
 UART and restarts the DMA, checking each return value.
@@ -77,7 +76,8 @@ gnssTaskHandle = osThreadNew(gnss_task, NULL, &gnssTask_attributes);
 ```
 
 `gnss_task()` then brings the module up — retrying every 2 s for as long as it
-takes — and afterwards publishes one `gnss_fix_t` per NAV-PVT. Other code reads it
+takes — and afterwards publishes one `gnss_fix_t` per NAV-PVT. If no UBX frame
+arrives for 3 s it reconfigures the module, which covers a module-only reset. Other code reads it
 with:
 
 ```c
@@ -109,28 +109,31 @@ snapshot that has `fix_valid`.
 
 | Setting | Value | Source |
 |---|---|---|
-| Constellations | GPS + Galileo (+ SBAS + QZSS, which ride along with GPS) | team decision; already the factory default, so no `CFG-SIGNAL` is sent |
-| Navigation rate | 20 Hz | datasheet Table 2: GPS+GAL high-performance ceiling is exactly 20 Hz |
-| UART baud | 115200 | 20 Hz x 100 B x 10 bit = 20 kbit/s, 17% of the line |
+| Constellations | GPS + Galileo (+ SBAS + QZSS, which ride along with GPS) | team decision; the module ships with BeiDou on, so BeiDou and GLONASS are disabled explicitly |
+| Navigation rate | 10 Hz | datasheet Table 2: GPS+GAL at the default CPU clock; 20 Hz needs an irreversible OTP write |
+| UART baud | 115200 | 10 Hz x 100 B x 10 bit = 10 kbit/s, 9% of the line |
 | Output message | UBX-NAV-PVT only | one message carries fix, position, velocity, accuracy and time |
-| NMEA | disabled unconditionally | no runtime flag exists yet — see "Still open" |
-| Dynamic model | airborne <4 g | the default pedestrian model rejects the trajectory outright |
-| Config persistence | re-sent every boot | MAX-M10S-00B is ROM SPG 5.10; there is no flash to save to |
+| NMEA | disabled unconditionally | the driver parses UBX only |
+| Dynamic model | airborne <4 g | the default portable model caps at 310 m/s horizontal, 50 m/s vertical, 12 km |
+| Config persistence | RAM + BBR, re-sent every boot | MAX-M10S-00B is ROM SPG 5.10 with no flash; BBR survives while the backup cell holds |
 
 ### Configuration sequence sent by `max_m10s_configure()`
 
-After the baud-rate negotiation above, the baud key is the only message sent on its
-own. The five settings below go out together as **one** `CFG-VALSET` message (RAM
-layer only, `layers = 0x01`), so a single `ACK-ACK` covers them with one retry
-budget (3 attempts x 200 ms); a NAK fails the whole group and is not retried. The
-module therefore cannot say which of them it disliked.
+After the baud-rate negotiation above, the constellation keys go out as their own
+`CFG-VALSET` (a signal change restarts the receiver; the driver waits 500 ms after
+the ACK). The five settings below then go out together as **one** `CFG-VALSET`
+message (`layers = 0x03`, RAM + BBR), so a single `ACK-ACK` covers them with one
+retry budget (3 attempts x 200 ms); a NAK fails the whole group and is not retried.
+The module therefore cannot say which of them it disliked.
 
 | Key ID | Type | Value | Meaning |
 |---|---|---|---|
 | `0x40520001` | U4 | `115200` | CFG-UART1-BAUDRATE — sent first, on its own |
+| `0x1031001f` / `0x10310021` | L | `1` / `1` | CFG-SIGNAL-GPS_ENA / GAL_ENA — sent second, with the two below |
+| `0x10310022` / `0x10310025` | L | `0` / `0` | CFG-SIGNAL-BDS_ENA / GLO_ENA |
 | `0x20110021` | U1 | `8` | CFG-NAVSPG-DYNMODEL — airborne <4 g |
-| `0x30210001` | U2 | `50` | CFG-RATE-MEAS — 50 ms measurement period |
-| `0x30210002` | U2 | `1` | CFG-RATE-NAV — 1 solution per measurement (with the row above: 20 Hz) |
+| `0x30210001` | U2 | `100` | CFG-RATE-MEAS — 100 ms measurement period |
+| `0x30210002` | U2 | `1` | CFG-RATE-NAV — 1 solution per measurement (with the row above: 10 Hz) |
 | `0x20910007` | U1 | `1` | CFG-MSGOUT-UBX_NAV_PVT_UART1 — enable NAV-PVT on UART1 |
 | `0x10740002` | L | `0` | CFG-UART1OUTPROT-NMEA — disable NMEA output on UART1 |
 
@@ -142,7 +145,7 @@ values are named constants and a table in `max_m10s.c`.
 The receiver is specified to `<= 4 g`, 500 m/s, 80 km (datasheet Table 1). The
 vehicle exceeds 4 g under thrust, so **expect the fix to drop during the burn and
 for some seconds after** while the receiver reacquires. A NAV-PVT also describes
-an epoch already 50-150 ms old when its last byte lands, which is 15-45 m of
+an epoch already 100-200 ms old when its last byte lands, which is 30-60 m of
 position error at 300 m/s from latency alone.
 
 The driver therefore reports quality rather than hiding it, and nothing in it

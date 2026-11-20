@@ -28,6 +28,8 @@ static UART_HandleTypeDef *volatile s_huart;
 
 #define GNSS_TASK_WAKE_TIMEOUT_MS    1000u
 #define GNSS_CONFIG_RETRY_DELAY_MS   2000u   /* pause between configuration attempts */
+/* No frame for this long means the module reset and lost its RAM configuration. */
+#define GNSS_SILENCE_REINIT_MS       3000u
 
 /* NED datum and its capture request. Owned by this task; the request flag is
  * set from another task by gnss_capture_datum(). Zero-initialised, so the datum
@@ -209,7 +211,8 @@ void gnss_task(void *arg)
     (void)arg;
     assert(s_huart != NULL && "gnss_init() must run before the task starts");
 
-    const uint8_t failures = bring_up_module();
+    uint8_t  failures   = bring_up_module();
+    uint32_t last_frame = HAL_GetTick();
 
     for (;;)
     {
@@ -217,9 +220,17 @@ void gnss_task(void *arg)
         // event arrives while the DMA is stopped.
         (void)osSemaphoreAcquire(s_gnss_idle_sem, GNSS_TASK_WAKE_TIMEOUT_MS);
 
+        if ((uint32_t)(HAL_GetTick() - last_frame) > GNSS_SILENCE_REINIT_MS)
+        {
+            publish_link(GNSS_LINK_FAILED, (uint8_t)MAX_M10S_ERR_TIMEOUT, failures);
+            failures   = bring_up_module();
+            last_frame = HAL_GetTick();
+        }
+
         max_m10s_frame_t frame;
         while (max_m10s_drain(&s_drv, &frame))
         {
+            last_frame = HAL_GetTick();
             if (!is_nav_pvt(&frame))
                 continue;
 

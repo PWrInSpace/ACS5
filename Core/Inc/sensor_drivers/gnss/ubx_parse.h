@@ -145,14 +145,15 @@ typedef struct
     float    head_motion_deg;  /* course over ground */
     float    head_acc_deg;
     float    p_dop;            /* position dilution of precision */
+    bool     invalid_llh;      /* flags3 bit 0: lat, lon, height and hMSL are invalid */
 } ubx_nav_pvt_t;
 
 
 bool ubx_decode_nav_pvt(const uint8_t *payload, uint16_t len, ubx_nav_pvt_t *out);
 
 /* True if the solution carries a usable position: the receiver flags it valid
- * (fix_ok) and it is a 3D fix or GNSS + dead reckoning. 2D, dead reckoning alone
- * and time-only fixes do not qualify (time-only has no position at all). */
+ * (fix_ok), it is a 3D fix or GNSS + dead reckoning, and invalidLlh is clear. 2D,
+ * dead reckoning alone and time-only fixes do not qualify. */
 bool ubx_nav_pvt_has_position(const ubx_nav_pvt_t *pvt);
 
 /* True if the frame just completed in *p is an ACK-ACK or ACK-NAK answering the

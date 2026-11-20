@@ -286,6 +286,21 @@ static void test_has_position_truth_table(void) {
     }
 }
 
+/* flags3 bit 0 (invalidLlh) voids lat/lon/height even on a valid 3D fix. */
+static void test_invalid_llh_voids_position(void) {
+    uint8_t pl[92];
+    make_pvt(pl, UBX_FIX_3D, 0x01);
+    ubx_nav_pvt_t v;
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(!v.invalid_llh);
+    CHECK(ubx_nav_pvt_has_position(&v));
+
+    put_u16(&pl[78], 0x0001);
+    CHECK(ubx_decode_nav_pvt(pl, 92, &v));
+    CHECK(v.invalid_llh);
+    CHECK(!ubx_nav_pvt_has_position(&v));
+}
+
 /* ---------------------------------------------------------------- ACK */
 
 static void parse_ack(ubx_parser_t *p, uint8_t id, uint8_t cls, uint8_t msg) {
@@ -345,6 +360,7 @@ int main(void) {
     test_decode_nav_pvt_flags_and_length();
     test_nav_pvt_survives_the_wire();
     test_has_position_truth_table();
+    test_invalid_llh_voids_position();
     test_is_ack_for();
     return test_report("ubx_parse");
 }

@@ -34,8 +34,9 @@ typedef struct
     uint8_t  size;   /* value width in bytes: 1, 2 or 4 */
 } cfg_item_t;
 
-/* CFG-VALSET RAM layer. */
-#define MAX_M10S_CFG_LAYER_RAM 0x01u
+/* CFG-VALSET layers: RAM, plus battery-backed RAM so a power cycle with the
+ * backup cell fitted keeps the configuration. */
+#define MAX_M10S_CFG_LAYERS    0x03u
 
 /* Configuration keys (u-blox M10 SPG 5.10 interface description). */
 #define MAX_M10S_KEY_UART1_BAUDRATE         0x40520001u   /* U4 */
@@ -44,10 +45,16 @@ typedef struct
 #define MAX_M10S_KEY_RATE_NAV               0x30210002u   /* U2, cycles */
 #define MAX_M10S_KEY_MSGOUT_NAV_PVT_UART1   0x20910007u   /* U1 */
 #define MAX_M10S_KEY_UART1OUTPROT_NMEA      0x10740002u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GPS_ENA         0x1031001fu   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GAL_ENA         0x10310021u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_BDS_ENA         0x10310022u   /* L  */
+#define MAX_M10S_KEY_SIGNAL_GLO_ENA         0x10310025u   /* L  */
 
 /* Configuration values. */
 #define MAX_M10S_DYNMODEL_AIRBORNE_4G  8u    /* airborne, < 4 g */
-#define MAX_M10S_MEAS_PERIOD_MS        50u   /* 50 ms -> 20 Hz with NAV rate 1 */
+/* MAX-M10S at the default CPU clock: 10 Hz max with GPS+Galileo (datasheet
+ * Table 2); 20 Hz needs an irreversible OTP clock change. */
+#define MAX_M10S_MEAS_PERIOD_MS        100u
 #define MAX_M10S_NAV_RATE_CYCLES       1u    /* one solution per measurement */
 
 /* ------------------------------------------------------------ tuning constants */
@@ -59,7 +66,16 @@ typedef struct
  * configuration lives in the module's RAM, so after an MCU-only reset the module
  * is still at the flight speed; after a power cycle it is at the boot speed. */
 #define MAX_M10S_BAUD_FLIGHT    115200u
-#define MAX_M10S_BAUD_BOOT      38400u
+
+/* Power-on speeds to probe: MAX-M10S boots at 9600 (integration manual 2.1.4),
+ * unlike the 38400 firmware default of other M10 modules. */
+static const uint32_t s_boot_bauds[] = {9600u, 38400u};
+
+/* The module needs this long after a baud change before it listens at the new speed. */
+#define MAX_M10S_BAUD_SETTLE_MS 100u
+
+/* A signal change restarts the GNSS subsystem; wait this long after its ACK. */
+#define MAX_M10S_SIGNAL_SETTLE_MS 500u
 
 /* Blocking HAL transmit timeout for one CFG-VALSET frame. */
 #define MAX_M10S_TX_TIMEOUT_MS  50u
@@ -157,7 +173,7 @@ static max_m10s_status_t send_cfg_valset(const max_m10s_driver_t *drv,
         return MAX_M10S_ERR_HAL;
 
     payload[0] = 0x00u;                     /* version */
-    payload[1] = MAX_M10S_CFG_LAYER_RAM;    /* layers */
+    payload[1] = MAX_M10S_CFG_LAYERS;       /* layers */
     payload[2] = 0x00u;                     /* reserved */
     payload[3] = 0x00u;                     /* reserved */
 
@@ -233,6 +249,16 @@ max_m10s_status_t max_m10s_init(max_m10s_driver_t *drv, UART_HandleTypeDef *huar
 static const cfg_item_t s_baud_item =
     { MAX_M10S_KEY_UART1_BAUDRATE, MAX_M10S_BAUD_FLIGHT, 4u };
 
+/* GPS + Galileo only: the module ships with BeiDou on, which caps the
+ * navigation rate at 3 Hz. Sent alone because it restarts the receiver. */
+static const cfg_item_t s_signal_table[] =
+{
+    { MAX_M10S_KEY_SIGNAL_GPS_ENA, 1u, 1u },
+    { MAX_M10S_KEY_SIGNAL_GAL_ENA, 1u, 1u },
+    { MAX_M10S_KEY_SIGNAL_BDS_ENA, 0u, 1u },
+    { MAX_M10S_KEY_SIGNAL_GLO_ENA, 0u, 1u },
+};
+
 /* Everything else, sent after the baud change as one CFG-VALSET message with a
  * single ACK. */
 static const cfg_item_t s_cfg_table[] =
@@ -260,13 +286,9 @@ static bool set_host_baud(const max_m10s_driver_t *drv, uint32_t baud)
     return start_rx_dma(drv);
 }
 
-/* Brings the link up at MAX_M10S_BAUD_FLIGHT whatever speed the module is at.
- *
- * 1. Try the flight speed first: if the module is already there, and its ACK 
- *    proves the link.
- * 2. No answer: the module is at the boot speed. Send the same command at the
- *    boot speed.
- * 3. Switch the STM32 to the flight speed and require an ACK there. */
+/* Brings the link up at MAX_M10S_BAUD_FLIGHT whatever speed the module is at:
+ * the flight speed answers directly; otherwise, for each boot speed, send the
+ * baud change there, let the module switch, and require an ACK at flight speed. */
 static max_m10s_status_t negotiate_baud(const max_m10s_driver_t *drv)
 {
     max_m10s_status_t st;
@@ -277,15 +299,22 @@ static max_m10s_status_t negotiate_baud(const max_m10s_driver_t *drv)
     if (st != MAX_M10S_ERR_TIMEOUT)
         return st;   /* OK: already at flight speed. NAK or HAL error: give up. */
 
-    if (!set_host_baud(drv, MAX_M10S_BAUD_BOOT))
-        return MAX_M10S_ERR_HAL;
-    st = send_cfg_valset(drv, &s_baud_item, 1u, 1u);
-    if (st != MAX_M10S_OK && st != MAX_M10S_ERR_TIMEOUT)
-        return st;
+    for (size_t i = 0; i < sizeof s_boot_bauds / sizeof s_boot_bauds[0]; i++)
+    {
+        if (!set_host_baud(drv, s_boot_bauds[i]))
+            return MAX_M10S_ERR_HAL;
+        st = send_cfg_valset(drv, &s_baud_item, 1u, 1u);
+        if (st != MAX_M10S_OK && st != MAX_M10S_ERR_TIMEOUT)
+            return st;
+        HAL_Delay(MAX_M10S_BAUD_SETTLE_MS);
 
-    if (!set_host_baud(drv, MAX_M10S_BAUD_FLIGHT))
-        return MAX_M10S_ERR_HAL;
-    return send_cfg_valset(drv, &s_baud_item, 1u, MAX_M10S_CFG_RETRIES);
+        if (!set_host_baud(drv, MAX_M10S_BAUD_FLIGHT))
+            return MAX_M10S_ERR_HAL;
+        st = send_cfg_valset(drv, &s_baud_item, 1u, MAX_M10S_CFG_RETRIES);
+        if (st != MAX_M10S_ERR_TIMEOUT)
+            return st;
+    }
+    return MAX_M10S_ERR_TIMEOUT;
 }
 
 max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
@@ -293,6 +322,13 @@ max_m10s_status_t max_m10s_configure(max_m10s_driver_t *drv)
     max_m10s_status_t st = negotiate_baud(drv);
     if (st != MAX_M10S_OK)
         return st;
+
+    st = send_cfg_valset(drv, s_signal_table,
+                         sizeof s_signal_table / sizeof s_signal_table[0],
+                         MAX_M10S_CFG_RETRIES);
+    if (st != MAX_M10S_OK)
+        return st;
+    HAL_Delay(MAX_M10S_SIGNAL_SETTLE_MS);
 
     st = send_cfg_valset(drv, s_cfg_table, CFG_TABLE_LEN, MAX_M10S_CFG_RETRIES);
     if (st != MAX_M10S_OK)
