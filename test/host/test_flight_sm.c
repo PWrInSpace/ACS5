@@ -4,7 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "control/flight_sm.h"
+#include "flight/flight_sm.h"
 
 /* Published baro intervals the driver actually produces: the ~16.7 Hz cadence
  * the thresholds were first set against, and the ~94 Hz one a 10 ms poll gives

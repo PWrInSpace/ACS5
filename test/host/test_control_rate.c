@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 
 static void test_sec_to_ticks_lands_on_wall_time(void)
 {

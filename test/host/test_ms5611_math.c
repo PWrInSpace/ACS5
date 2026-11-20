@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "baro/ms5611_math.h"
+#include "sensor_drivers/baro/ms5611_math.h"
 
 static void test_datasheet_golden(void) {
     // MS5611 datasheet worked example.

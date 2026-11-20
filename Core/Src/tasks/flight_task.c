@@ -1,15 +1,20 @@
-#include "aggregator.h"   /* flight_data_t + iim42653/ms5611/mmc5983ma headers */
+#include "tasks/flight_task.h"
 #include "filter/attitude.h"
 #include "control/axes.h"
-#include "control/control_rate.h"
-#include "control/flight_sm.h"
-#include "control/arming.h"
+#include "utils/control_rate.h"
+#include "flight/flight_sm.h"
+#include "flight/arming.h"
+#include "flight/baro_datum.h"
+#include "flight/estimator_policy.h"
+#include "control/qbar.h"
 #include "control/roll_ctrl.h"
-#include "servos/servo_t75.h"
-#include "servos/canard_lock.h"
-#include "servos/servo_bench.h"
-#include "flight/flight_data.h"
+#include "sensor_drivers/servos/servo_t75.h"
+#include "sensor_drivers/servos/canard_lock.h"
+#ifdef ACS5_SERVO_BENCH
+#include "sensor_drivers/servos/servo_bench.h"
+#endif
 #include "tasks/gnss_task.h"
+#include "tasks/sd_log_task.h"
 #include "utils/mathx.h"
 #include "utils/timestamp.h"
 #include "spi.h"
@@ -18,6 +23,7 @@
 #include "task.h"
 #include "cmsis_os2.h"
 #include "tim.h"
+#include "usb_device.h"
 #include "usb_print.h"
 #include "buzzer/buzzer.h"
 #include <stdbool.h>
@@ -28,12 +34,9 @@ static iim42653_t   g_imu;
 static ms5611_t     g_baro;
 static mmc5983ma_t  g_mag;
 static attitude_t g_est;
+static servo_bank_t75_t g_servos;
 
-extern void MX_USB_DEVICE_Init(void);
-extern TIM_HandleTypeDef htim3;
-extern TIM_HandleTypeDef htim2;
-extern TIM_HandleTypeDef htim15;
-extern osThreadId_t sdTaskHandle;
+extern osThreadId_t sdTaskHandle;   /* created in freertos.c */
 
 /* SPLIT V3: MOSFET gate HIGH powers the camera. PC0/PC2 held off for now. */
 static void camera_set_enabled(bool on)
@@ -130,20 +133,9 @@ static void print_attitude_deg(const float euler_rad[3])
 }
 
 
-/* ===========================================================================
- *  Aggregator Task
- * =========================================================================== */
-void StartAggregator(void *argument)
+/* IMU is mandatory and halts on failure; baro and mag only report. */
+static void sensors_init(void)
 {
-    (void)argument;
-    MX_USB_DEVICE_Init();
-
-    vTaskDelay(pdMS_TO_TICKS(5000));
-    timestamp_init();
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
-    USB_PRINTF("--- ACS5 Aggregator Task Starting ---\r\n");
-
     /* -- IMU -------------------------------------------------------------- */
     /* Estimation and roll control are unrecoverable without inertial data, and
      * a configure that fails partway leaves the part powered down while still
@@ -191,9 +183,11 @@ void StartAggregator(void *argument)
         USB_PRINTF("[ERROR] Mag configure FAILED\r\n");
     else
         USB_PRINTF("[OK] Mag Initialized\r\n");
+}
 
-    /* -- Servos + canard lock ------------------------------------------- */
-    static servo_bank_t75_t g_servos;
+/* Servos to neutral and canards locked; halts if PWM cannot start. */
+static void actuators_init(void)
+{
     servo_t75_config_t servo_cfg = servo_t75_config_rocket_default();
     if (!servo_bank_t75_init(&g_servos, &htim3, &servo_cfg) ||
         !canard_lock_init(&htim2))
@@ -206,6 +200,24 @@ void StartAggregator(void *argument)
 
     servo_bank_t75_arm(&g_servos);
     USB_PRINTF("[OK] Servos armed (neutral), canards locked\r\n");
+}
+
+/* ===========================================================================
+ *  Flight Task
+ * =========================================================================== */
+void StartFlightTask(void *argument)
+{
+    (void)argument;
+    MX_USB_DEVICE_Init();
+
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    timestamp_init();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    USB_PRINTF("--- ACS5 Flight Task Starting ---\r\n");
+
+    sensors_init();
+    actuators_init();
 
 #ifdef ACS5_SERVO_BENCH
     /* Separate build so the bench sequence cannot exist in flight firmware. */
@@ -250,7 +262,7 @@ void StartAggregator(void *argument)
     ctrl_arm_config_t arm_cfg = ctrl_arm_config_default();
     ctrl_arm_init(&g_arm, &arm_cfg);
 
-    bool     baro_datum_set   = false;
+    baro_datum_t baro_datum   = {0};
     uint32_t imu_fail_streak  = 0;
     bool     calib_reported   = false;
 
@@ -301,31 +313,13 @@ void StartAggregator(void *argument)
             if (ms5611_has_new_data(&g_baro))
             {
                 ms5611_sample_t s = ms5611_sample(&g_baro);
-                bool publish = true;
-
-                /* On the pad the current pressure IS the zero reference, so the
-                 * whole system speaks metres above the launch site and the day's
-                 * weather cancels itself. Tracking rather than latching keeps the
-                 * reference fresh through a long hold; it stops on its own at
-                 * launch detection because the state stops being STANDBY. */
-                if (g_sm.state == FLIGHT_STATE_STANDBY)
-                {
+                /* Tracking the pad pressure keeps the datum fresh through a long hold. */
+                baro_datum_action_t act =
+                    baro_datum_on_sample(&baro_datum, g_sm.state == FLIGHT_STATE_STANDBY);
+                if (act.retarget_qnh)
                     ms5611_set_qnh(&g_baro, s.pressure_pa);
 
-                    /* altitude_m is computed inside the driver at publish time
-                     * against the QNH in force then, so this sample still carries
-                     * the previous datum - roughly 700 m at a 500 m ASL site.
-                     * Publishing it would anchor attitude.pos[2] there and
-                     * spike flight_sm.baro_vel_z past 1000 m/s for ~2 s. Drop it;
-                     * the next sample is AGL. */
-                    if (!baro_datum_set)
-                    {
-                        baro_datum_set = true;
-                        publish        = false;
-                    }
-                }
-
-                if (publish)
+                if (act.publish)
                 {
                     flight_data.baro_sample = s;
                     baro_dt_s  = s.dt_s;      /* driver-measured; 0 = no usable interval */
@@ -343,25 +337,16 @@ void StartAggregator(void *argument)
         }
         est_in.imu_valid  = imu_ok;
         est_in.mag_valid  = mag_ok;
-        /* Standby and recovery are the phases where the accelerometer really is
-         * measuring gravity - on the pad, and hanging under the chute. Between
-         * them it measures thrust and drag, and levelling against those walks
-         * the attitude away from the truth the maneuver is steering by. */
-        est_in.corrections_inhibited =
-            (g_sm.state == FLIGHT_STATE_ACCELERATION ||
-             g_sm.state == FLIGHT_STATE_FREE_FLIGHT  ||
-             g_sm.state == FLIGHT_STATE_FALLING);
+        estimator_gates_t gates = estimator_gates(g_sm.state, g_est.calib.done);
+        est_in.corrections_inhibited = gates.corrections_inhibited;
+        est_in.collecting_calib      = gates.collecting_calib;
+        est_in.zupt_active           = gates.zupt_active;
         est_in.baro_alt_m = flight_data.baro_sample.altitude_m;
-        /* The estimator holds the last altitude between publishes, which is
-         * correct; a dead barometer looks identical unless the sample age is
-         * checked, and the blend would drag pos Z onto a frozen value. */
-        est_in.baro_valid =
-            (flight_data.baro_sample.timestamp_us != 0) &&
-            ((timestamp_us() - flight_data.baro_sample.timestamp_us) < BARO_MAX_AGE_US);
+        /* A dead barometer keeps its last finite sample; only the age reveals it. */
+        est_in.baro_valid = baro_sample_fresh(flight_data.baro_sample.timestamp_us,
+                                              timestamp_us(), BARO_MAX_AGE_US);
         est_in.baro_vel_z     = g_sm.baro_vel_z;
-        est_in.baro_vel_valid = (g_sm.state != FLIGHT_STATE_STANDBY) || baro_datum_set;
-        est_in.collecting_calib = (g_sm.state == FLIGHT_STATE_STANDBY) && !g_est.calib.done;
-        est_in.zupt_active      = (g_sm.state == FLIGHT_STATE_STANDBY);
+        est_in.baro_vel_valid = estimator_baro_vel_valid(g_sm.state, baro_datum.set);
         attitude_update(&g_est, &est_in);
 
         if (g_est.calib.done && !calib_reported) {
@@ -407,7 +392,7 @@ void StartAggregator(void *argument)
         ctrl_arm_input_t arm_in = {
             .flight_state   = g_sm.state,
             .alt_m          = flight_data.baro_sample.altitude_m,
-            .baro_datum_set = baro_datum_set,
+            .baro_datum_set = baro_datum.set,
         };
         ctrl_arm_state_t prev_arm = g_arm.state;
         bool maneuver_enabled = ctrl_arm_step(&g_arm, &arm_in);
@@ -416,30 +401,12 @@ void StartAggregator(void *argument)
                        (int)prev_arm, (int)g_arm.state,
                        flight_data.baro_sample.altitude_m);
 
-        /* Dynamic pressure for gain scheduling. Density from the barometer's own
-         * pressure and temperature (dry-air gas constant), speed from the
-         * estimator - its vertical component is anchored to the barometer, and
-         * the vehicle is near vertical through the maneuver, so |v| is sound
-         * even though the lateral components are dead-reckoned.
-         *
-         * The same age check the estimator uses gates this: a dead barometer
-         * keeps returning its last finite sample, so a finiteness test alone
-         * would compute density from a frozen reading. Stale or non-finite
-         * leaves qbar at zero, which roll_ctrl reads as "no measurement" and
-         * answers with fixed gains rather than by standing the canards down. */
-        float qbar_pa = 0.0f;
-        if (est_in.baro_valid &&
-            isfinite(flight_data.baro_sample.pressure_pa) &&
-            isfinite(flight_data.baro_sample.temperature_c))
-        {
-            float t_kelvin = flight_data.baro_sample.temperature_c + 273.15f;
-            float rho = flight_data.baro_sample.pressure_pa / (287.05f * t_kelvin);
-            float vsq = g_est.vel[0] * g_est.vel[0] +
-                        g_est.vel[1] * g_est.vel[1] +
-                        g_est.vel[2] * g_est.vel[2];
-            if (isfinite(rho) && isfinite(vsq) && rho > 0.0f)
-                qbar_pa = 0.5f * rho * vsq;
-        }
+        /* |v| from the estimator is sound: vertical is baro-anchored and the
+         * vehicle is near vertical through the maneuver. */
+        float qbar_pa = qbar_from_baro(est_in.baro_valid,
+                                       flight_data.baro_sample.pressure_pa,
+                                       flight_data.baro_sample.temperature_c,
+                                       g_est.vel);
 
         roll_ctrl_input_t rc_in = {
             .q                = g_est.q,
@@ -472,9 +439,7 @@ void StartAggregator(void *argument)
 
         if (do_log)
         {
-            /* Write unconditionally - the SD task owns the consumer side.
-             * Dropping the !g_log.fresh guard was the original logging bug:
-             * if the SD task stalls, fresh stays true and nothing gets packed. */
+            /* Overwrite unconditionally: a stalled SD task must not stop packing. */
             for (int i = 0; i < 3; i++) {
                 g_log.pos[i]       = g_est.pos[i];
                 g_log.vel[i]       = g_est.vel[i];
@@ -514,7 +479,6 @@ void StartAggregator(void *argument)
                        sizeof(g_log.gnss_vel_ned_mps));
             }
 
-            __DMB();  /* ensure all writes to g_log are visible before waking SD task */
             xTaskNotify((TaskHandle_t)sdTaskHandle, 0x01, eSetBits);
         }
 

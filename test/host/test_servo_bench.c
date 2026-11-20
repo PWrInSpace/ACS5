@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "servos/servo_bench.h"
+#include "sensor_drivers/servos/servo_bench.h"
 
 static int nonzero_fins(const servo_bench_cmd_t *c) {
     int n = 0;

@@ -16,7 +16,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "aggregator.h"
+#include "tasks/flight_task.h"
 #include "usb_print.h"
 #include "usart.h"
 #include "tasks/gnss_task.h"
@@ -42,10 +42,10 @@
 /* USER CODE BEGIN Variables */
 
 /* USER CODE END Variables */
-/* Definitions for aggregatorTask */
-osThreadId_t aggregatorTaskHandle;
-const osThreadAttr_t aggregatorTask_attributes = {
-  .name = "aggregatorTask",
+/* Definitions for flightTask */
+osThreadId_t flightTaskHandle;
+const osThreadAttr_t flightTask_attributes = {
+  .name = "flightTask",
   .stack_size = 2048 * 4,
   .priority = (osPriority_t) osPriorityAboveNormal,
 };
@@ -69,7 +69,7 @@ const osThreadAttr_t gnssTask_attributes = {
 
 /* USER CODE END FunctionPrototypes */
 
-extern void StartAggregator(void *argument);
+extern void StartFlightTask(void *argument);
 extern void StartSDTask(void *argument);
 extern void gnss_task(void *argument);
 
@@ -103,8 +103,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of aggregatorTask */
-  aggregatorTaskHandle = osThreadNew(StartAggregator, NULL, &aggregatorTask_attributes);
+  /* creation of flightTask */
+  flightTaskHandle = osThreadNew(StartFlightTask, NULL, &flightTask_attributes);
 
   /* creation of sdTask */
   sdTaskHandle = osThreadNew(StartSDTask, NULL, &sdTask_attributes);
@@ -123,24 +123,24 @@ void MX_FREERTOS_Init(void) {
 
 }
 
-/* USER CODE BEGIN Header_StartAggregator */
+/* USER CODE BEGIN Header_StartFlightTask */
 /**
-  * @brief  Function implementing the aggregatorTask thread.
+  * @brief  Function implementing the flightTask thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartAggregator */
-__weak void StartAggregator(void *argument)
+/* USER CODE END Header_StartFlightTask */
+__weak void StartFlightTask(void *argument)
 {
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
-  /* USER CODE BEGIN StartAggregator */
+  /* USER CODE BEGIN StartFlightTask */
   /* Infinite loop */
   for(;;)
   {
     osDelay(1);
   }
-  /* USER CODE END StartAggregator */
+  /* USER CODE END StartFlightTask */
 }
 
 /* Private application code --------------------------------------------------*/

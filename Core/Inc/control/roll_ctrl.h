@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 
 /* Trapezoidal setpoint profile.
  * Shapes the commanded roll angle so the cascade tracks a feasible

@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "control/flight_sm.h"
+#include "flight/flight_sm.h"
 
 /* Decides when the roll controller may drive the canards.
  *

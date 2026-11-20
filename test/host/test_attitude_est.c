@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 #include "filter/attitude.h"
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 #include "utils/mathx.h"
 
 /* Tick counts below encode durations. */

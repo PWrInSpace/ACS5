@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 #include "filter/mahony.h"
 
 /* Public attitude / nav estimator facade. Call sites pull from filter/;

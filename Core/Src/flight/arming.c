@@ -1,5 +1,5 @@
-#include "control/arming.h"
-#include "control/control_rate.h"
+#include "flight/arming.h"
+#include "utils/control_rate.h"
 
 ctrl_arm_config_t ctrl_arm_config_default(void)
 {

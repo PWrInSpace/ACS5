@@ -2,7 +2,7 @@
 
 #include <stdbool.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 #include "utils/mathx.h"
 
 /* Accel magnitude window inside which the accelerometer is trusted as gravity. */

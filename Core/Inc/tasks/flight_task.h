@@ -1,5 +1,4 @@
-#ifndef AGGREGATOR_H
-#define AGGREGATOR_H
+#pragma once
 
 #include <stdint.h>
 
@@ -15,6 +14,4 @@ typedef struct
 } flight_data_t;
 
 /* FreeRTOS task entry (registered via osThreadNew in freertos.c). */
-void StartAggregator(void *argument);
-
-#endif /* AGGREGATOR_H */
+void StartFlightTask(void *argument);

@@ -1,4 +1,4 @@
-#include "servos/canard_lock.h"
+#include "sensor_drivers/servos/canard_lock.h"
 
 static TIM_HandleTypeDef *s_htim;
 

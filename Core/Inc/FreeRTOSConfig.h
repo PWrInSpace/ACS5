@@ -167,9 +167,9 @@ standard names. */
 /* USER CODE BEGIN Defines */
 /* Section where parameter definitions can be added (for instance, to override default ones in FreeRTOS.h) */
 
-/* Two tasks format floats (the aggregator's printf and the SD task's
+/* Two tasks format floats (the flight task's printf and the SD task's
  * snprintf). A shared newlib reent puts them on one _dtoa/Balloc freelist,
- * which the preempting aggregator can corrupt mid-allocation. */
+ * which the preempting flight task can corrupt mid-allocation. */
 #define configUSE_NEWLIB_REENTRANT 1
 /* USER CODE END Defines */
 

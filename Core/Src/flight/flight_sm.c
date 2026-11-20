@@ -1,5 +1,5 @@
-#include "control/flight_sm.h"
-#include "control/control_rate.h"
+#include "flight/flight_sm.h"
+#include "utils/control_rate.h"
 #include "utils/mathx.h"
 
 #include <math.h>

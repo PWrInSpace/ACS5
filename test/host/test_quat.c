@@ -4,7 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "control/quat.h"
+#include "utils/quat.h"
 #include "utils/mathx.h"
 
 static quat_t axis_angle(float x, float y, float z, float angle)

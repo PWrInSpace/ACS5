@@ -63,9 +63,7 @@ void gnss_task_on_uart_error(UART_HandleTypeDef *huart)
 
 /* -------------------------------------------------------------- capture datum
  *
- * Called by the flight state machine when the rocket is on the 
- * pad with a confirmed 3D fix. The task latches
- * the datum from the next valid fix. */
+ * The task latches the datum from the next valid fix. */
 void gnss_capture_datum(void)
 {
     s_capture_pending = true;

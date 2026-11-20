@@ -55,13 +55,16 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Project-owned sources; CubeMX-generated files come in via cmake/stm32cubemx.
 set(ACS5_SOURCES
-    Core/Src/control/arming.c
-    Core/Src/control/flight_sm.c
-    Core/Src/control/quat.c
+    Core/Src/flight/arming.c
+    Core/Src/flight/flight_sm.c
+    Core/Src/flight/baro_datum.c
+    Core/Src/flight/estimator_policy.c
+    Core/Src/control/qbar.c
+    Core/Src/utils/quat.c
     Core/Src/control/roll_ctrl.c
     Core/Src/filter/attitude.c
     Core/Src/filter/mahony.c
-    Core/Src/sensor_drivers/aggregator.c
+    Core/Src/tasks/flight_task.c
     Core/Src/sensor_drivers/spi_dev.c
     Core/Src/sensor_drivers/imu/iim42653.c
     Core/Src/sensor_drivers/baro/ms5611.c
@@ -74,6 +77,7 @@ set(ACS5_SOURCES
     Core/Src/sensor_drivers/gnss/max_m10s.c
     Core/Src/sensor_drivers/gnss/ubx_parse.c
     Core/Src/tasks/gnss_task.c
+    Core/Src/tasks/sd_log_task.c
     Core/Src/usb_print.c
     Core/Src/utils/axes_remap.c
     Core/Src/utils/geo_ned.c
@@ -86,7 +90,6 @@ set_source_files_properties(${ACS5_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wextra;
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Inc
-    Core/Inc/sensor_drivers
 )
 
 # Add project symbols (macros)

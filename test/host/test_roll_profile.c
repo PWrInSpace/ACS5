@@ -6,7 +6,7 @@
 #include <stdio.h>
 
 #include "control/roll_ctrl.h"
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 #include "utils/mathx.h"
 
 #define DT       CONTROL_DT_S

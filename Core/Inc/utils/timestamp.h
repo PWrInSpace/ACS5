@@ -4,7 +4,7 @@
  * 2^32 cycles (~14.3 s @ 300 MHz); timestamp_cycles64() extends it in
  * software, so timestamp_us() is subtraction-safe for spans up to ~71 min.
  * The extension state is unguarded: call timestamp_us()/timestamp_cycles64()
- * from the aggregator task only.
+ * from the flight task only.
  */
 #pragma once
 

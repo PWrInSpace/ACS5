@@ -9,7 +9,7 @@
 #include <stdint.h>
 
 #include "utils/attributes.h"
-#include "servos/servo_t75_math.h"
+#include "sensor_drivers/servos/servo_t75_math.h"
 #include "stm32h7xx_hal.h" // TIM_HandleTypeDef
 
 #define SERVO_T75_FIN_COUNT 4

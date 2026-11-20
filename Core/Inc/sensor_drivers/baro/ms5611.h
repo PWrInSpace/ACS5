@@ -32,7 +32,7 @@
 #include "sensor_drivers/spi_dev.h"
 #include "utils/attributes.h"
 #include "main.h" // STM32 HAL types: GPIO_TypeDef, SPI_HandleTypeDef
-#include "baro/ms5611_math.h"
+#include "sensor_drivers/baro/ms5611_math.h"
 
 /* ========================================================
  * ms5611_sample_t - compensated barometer output
@@ -78,7 +78,7 @@ typedef struct
     uint8_t state;
     bool    initialized;
     bool    new_data;
-    /* Reference pressure for altitude_m. The aggregator retargets this to the
+    /* Reference pressure for altitude_m. The flight task retargets this to the
      * pad pressure during STANDBY, so altitude_m is metres above the launch
      * site, not above the standard-pressure datum - the SD log's baro_alt
      * column reads AGL. */

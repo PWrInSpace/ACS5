@@ -8,7 +8,7 @@ jobs:
   host-tests:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ninja-build gcc
       - name: Configure
@@ -25,7 +25,7 @@ jobs:
       matrix:
         preset: [Debug, Release, Bench]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install toolchain
         run: >
           sudo apt-get update && sudo apt-get install -y --no-install-recommends
@@ -34,7 +34,7 @@ jobs:
         run: cmake --preset ${{ matrix.preset }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: firmware-${{ matrix.preset }}
           path: |

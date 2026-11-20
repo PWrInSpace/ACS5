@@ -1,4 +1,4 @@
-#include "servos/servo_t75_math.h"
+#include "sensor_drivers/servos/servo_t75_math.h"
 #include "utils/mathx.h"
 
 #include <math.h>

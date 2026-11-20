@@ -1,4 +1,4 @@
-#include "mag/mmc5983ma.h"
+#include "sensor_drivers/mag/mmc5983ma.h"
 #include "utils/timestamp.h"
 
 #include "FreeRTOS.h"

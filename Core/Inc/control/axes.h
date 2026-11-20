@@ -4,7 +4,7 @@
 
 /* Body-frame axis convention for this airframe: index 2 (+Z) is the
  * longitudinal axis, pointing at the nose. The roll controller twists about it,
- * the aggregator takes the roll rate and the launch-detect acceleration from it. */
+ * the flight task takes the roll rate and the launch-detect acceleration from it. */
 #define BODY_AXIS_ROLL 2
 
 /* Sensor mounting on this PCB revision. Both packages sit on the board face

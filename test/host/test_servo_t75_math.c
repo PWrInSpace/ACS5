@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "servos/servo_t75_math.h"
+#include "sensor_drivers/servos/servo_t75_math.h"
 
 static void test_angle_to_pulse(void) {
     const servo_t75_limits_t lim = {1500, 1300, 1700, +1, 11.111f};

@@ -2,12 +2,12 @@
 
 #include <stdint.h>
 
-/* The single statement of the control-loop rate. The aggregator derives its
+/* The single statement of the control-loop rate. The flight task derives its
  * tick period from it, the estimator and the roll controller default their
  * dt_s to it, and the host tests integrate their plants on it.
  *
  * Everything rate-dependent derives from it through SEC_TO_TICKS/HZ_TO_TICKS:
- * the aggregator's loop-counter intervals and the tick-denominated debounces
+ * the flight task's loop-counter intervals and the tick-denominated debounces
  * in flight_sm and roll_ctrl. Adding a new one as a bare literal reintroduces
  * a constant that a rate change would silently rescale.
  *

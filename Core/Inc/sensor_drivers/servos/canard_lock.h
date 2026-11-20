@@ -1,12 +1,10 @@
-/*
- * Canard lock servo on J4 CH6 (PA5, TIM2_CH1). Pulse values in
- * servos/servo_bench.h (CANARD_LOCK_US_LOCKED / _UNLOCKED).
- */
+/* Canard lock servo on J4 CH6 (PA5, TIM2_CH1). */
 #pragma once
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "sensor_drivers/servos/canard_lock_pulse.h"
 #include "utils/attributes.h"
 #include "stm32h7xx_hal.h"
 

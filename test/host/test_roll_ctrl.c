@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 #include "control/roll_ctrl.h"
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 #include "utils/mathx.h"
 
 /* The plant integrates on the same dt the controller runs at. */

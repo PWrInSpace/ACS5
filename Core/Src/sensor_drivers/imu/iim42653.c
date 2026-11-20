@@ -5,7 +5,7 @@
  * Timing: vTaskDelay for ms sleeps, DWT busy-wait for us sleeps.
  */
 
-#include "imu/iim42653.h"
+#include "sensor_drivers/imu/iim42653.h"
 
 #include <math.h>
 #include <stddef.h>

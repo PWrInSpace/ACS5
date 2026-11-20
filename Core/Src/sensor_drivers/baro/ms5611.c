@@ -1,4 +1,4 @@
-#include "baro/ms5611.h"
+#include "sensor_drivers/baro/ms5611.h"
 #include "utils/timestamp.h" // timestamp_us()
 #include "FreeRTOS.h"
 #include "task.h"

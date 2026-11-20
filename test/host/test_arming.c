@@ -4,8 +4,8 @@
 #include "test_assert.h"
 #include <stdio.h>
 
-#include "control/arming.h"
-#include "control/control_rate.h"
+#include "flight/arming.h"
+#include "utils/control_rate.h"
 
 /* One second of control ticks: longer than any gate under test. */
 #define CTRL_LOOP_TICKS ((int)CONTROL_LOOP_HZ)

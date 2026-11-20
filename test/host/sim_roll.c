@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "control/control_rate.h"
+#include "utils/control_rate.h"
 #include "control/roll_ctrl.h"
 #include "utils/mathx.h"
 

@@ -1,4 +1,4 @@
-#include "baro/ms5611_math.h"
+#include "sensor_drivers/baro/ms5611_math.h"
 
 #include <math.h>
 #include <string.h>

@@ -12,7 +12,7 @@
 #define SPI_DEV_MAX_BURST 14U
 
 /* One software-CS slave. All three sensors share hspi2 and are driven from the
- * aggregator task alone, so transfers need no lock; adding a second caller
+ * flight task alone, so transfers need no lock; adding a second caller
  * means adding one here rather than in each driver.
  *
  * They do not share an SCK ceiling - the MMC5983MA is rated 10 MHz against the

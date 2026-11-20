@@ -7,11 +7,10 @@
 
 #include <stdint.h>
 
+#include "sensor_drivers/servos/canard_lock_pulse.h"
+
 #define SERVO_BENCH_FIN_COUNT      4
 #define SERVO_BENCH_DEFLECTION_DEG 10.0f
-
-#define CANARD_LOCK_US_LOCKED   1900u
-#define CANARD_LOCK_US_UNLOCKED 1050u
 
 typedef struct
 {

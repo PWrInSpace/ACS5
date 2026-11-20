@@ -1,4 +1,4 @@
-#include "servos/servo_t75.h"
+#include "sensor_drivers/servos/servo_t75.h"
 #include "tim.h"    /* CubeMX-generated, declares htim3 */
 
 /* -- Fin -> TIM channel mapping (ORC Meteor servo header J4) ----------------

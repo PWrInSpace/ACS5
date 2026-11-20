@@ -1,4 +1,4 @@
-#include "control/quat.h"
+#include "utils/quat.h"
 #include "utils/mathx.h"
 
 #include <math.h>

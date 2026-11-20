@@ -99,3 +99,12 @@ void usb_print_tx_complete(void)
     kick_locked();
     __set_PRIMASK(primask);
 }
+
+/* newlib stdout hook: printf() goes to the USB CDC ring. */
+int _write(int file, char *ptr, int len)
+{
+    (void)file;
+    if (len > 0)
+        usb_print_write((const uint8_t *)ptr, (uint16_t)len);
+    return len;
+}
